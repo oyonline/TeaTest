@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"tea-exam/internal/models"
+	"tea-exam/internal/security"
 )
 
 type AdminQuestionBank struct {
@@ -63,8 +64,17 @@ func (s *AdminService) Login(password string) error {
 		}
 		return err
 	}
-	if config.AdminPassword != password {
+	if !security.VerifyPassword(config.AdminPassword, password) {
 		return errors.New("密码错误")
+	}
+	if security.NeedsUpgrade(config.AdminPassword) && security.CanHashPassword(password) {
+		hash, err := security.HashPassword(password)
+		if err != nil {
+			return err
+		}
+		if err := s.db.Model(&config).Update("admin_password", hash).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -85,7 +95,11 @@ func (s *AdminService) InitAdminConfig(password string) error {
 	if count > 0 {
 		return nil
 	}
-	return s.db.Create(&models.AdminConfig{AdminPassword: password}).Error
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	return s.db.Create(&models.AdminConfig{AdminPassword: hash}).Error
 }
 
 func validateExamUserInput(input *ExamUserInput) error {
@@ -100,8 +114,8 @@ func validateExamUserInput(input *ExamUserInput) error {
 	if input.Password == "" {
 		return errors.New("登录密码不能为空")
 	}
-	if len([]rune(input.Password)) > 100 {
-		return errors.New("登录密码不能超过100个字符")
+	if len([]byte(input.Password)) > 72 {
+		return errors.New("登录密码不能超过72个字节")
 	}
 	return nil
 }
@@ -164,7 +178,11 @@ func (s *AdminService) CreateExamUser(input ExamUserInput) (*AdminExamUser, erro
 		return nil, err
 	}
 
-	user := models.ExamUser{Name: input.Name, Password: input.Password, Status: 1}
+	hash, err := security.HashPassword(input.Password)
+	if err != nil {
+		return nil, err
+	}
+	user := models.ExamUser{Name: input.Name, Password: hash, Status: 1}
 	if err := s.db.Create(&user).Error; err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 			return nil, errors.New("该答题人已存在")

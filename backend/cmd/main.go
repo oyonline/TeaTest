@@ -15,6 +15,9 @@ import (
 func main() {
 	// 加载配置
 	cfg := config.LoadConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("配置校验失败: %v", err)
+	}
 
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
@@ -36,7 +39,7 @@ func main() {
 	}
 
 	// 初始化基础数据
-	if err := utils.SeedData(db); err != nil {
+	if err := utils.SeedData(db, cfg.Security.AdminInitialPassword, cfg.Security.SeedDemoUsers); err != nil {
 		log.Printf("初始化基础数据失败: %v", err)
 	}
 
@@ -49,18 +52,21 @@ func main() {
 	authHandler := handlers.NewAuthHandler(userService, adminService, &cfg.JWT)
 	examHandler := handlers.NewExamHandler(examService)
 	adminHandler := handlers.NewAdminHandler(adminService)
+	healthHandler := handlers.NewHealthHandler(db)
 
 	// 创建 Gin 引擎
 	r := gin.Default()
 
 	// 跨域配置
-	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.CORSMiddleware(cfg.Security.AllowedOrigins))
 
 	// API 路由组
 	api := r.Group("/api")
 
 	// 公开路由
 	{
+		api.GET("/health", healthHandler.Check)
+
 		// 登录相关
 		api.POST("/auth/user/login", authHandler.UserLogin)
 		api.POST("/auth/admin/login", authHandler.AdminLogin)

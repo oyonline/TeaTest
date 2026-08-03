@@ -89,6 +89,8 @@ chmod +x start.sh
 
 ### 默认账号
 
+以下账号仅用于本地开发。生产部署不会自动创建示例答题人，管理员初始密码必须通过生产环境变量设置。
+
 | 角色 | 账号 | 密码 |
 |------|------|------|
 | 管理员 | admin | 123456 |
@@ -141,7 +143,13 @@ DB_USER=root           # 数据库用户
 DB_PASSWORD=           # 数据库密码
 DB_NAME=tea_exam       # 数据库名
 SERVER_PORT=8080       # 后端端口
+ADMIN_INITIAL_PASSWORD=123456  # 仅用于全新数据库
+SEED_DEMO_USERS=true           # 是否创建本地示例答题人
 ```
+
+## 阿里云部署
+
+中国内地 ECS、公网 IP、前后端与 MySQL 同机的部署步骤见 [DEPLOY_ALIYUN.md](./DEPLOY_ALIYUN.md)。生产环境使用 Docker Compose，只对公网开放 80 端口。
 
 ## 项目结构
 
@@ -241,18 +249,11 @@ go build -o tea-exam-server ./cmd/main.go
 
 登录管理后台，进入“答题人管理”，点击“新增答题人”，填写姓名和登录密码后保存。
 
-### 修改管理员密码
-
-```sql
-USE tea_exam;
-UPDATE admin_config SET admin_password = '新密码', updated_at = NOW();
-```
-
 ## 注意事项
 
 1. 支持单选题和多选题，题型编码为 `multiple_choice` 时自动识别为多选题
 2. 管理页支持查询和新增答题用户；停用账号或重置密码仍需直接维护数据库
-3. 密码明文存储（按需求）
+3. 新密码使用 bcrypt 哈希保存；升级前的明文密码会在首次成功登录后自动升级
 4. 支持多用户同时在线答题
 5. 同一账号可在多个设备登录（不互斥）
 6. 多选题判题规则：所选答案与标准答案完全一致才算正确，少选、多选、错选均判错

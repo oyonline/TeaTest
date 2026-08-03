@@ -1,0 +1,5 @@
+.git
+.env
+tea-exam-server
+coverage.out
+*.log

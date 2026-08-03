@@ -1,0 +1,9 @@
+# 生产服务器私密配置
+.env.production
+
+# 本地生产构建产物
+frontend/dist/
+
+# 数据库导入与备份文件
+tea_exam*.sql
+backups/

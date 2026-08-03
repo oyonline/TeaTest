@@ -18,7 +18,7 @@ func TestValidateExamUserInput(t *testing.T) {
 		{Name: "", Password: "123456"},
 		{Name: "张三", Password: ""},
 		{Name: strings.Repeat("答", 51), Password: "123456"},
-		{Name: "张三", Password: strings.Repeat("密", 101)},
+		{Name: "张三", Password: strings.Repeat("密", 25)},
 	}
 	for _, input := range tests {
 		if err := validateExamUserInput(&input); err == nil {
