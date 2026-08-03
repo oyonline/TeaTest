@@ -3,7 +3,7 @@
     <div class="login-box">
       <div class="login-header">
         <div class="logo">
-          <el-icon :size="48" color="#409eff"><TeaIcon /></el-icon>
+          <el-icon :size="48" color="#409eff"><Collection /></el-icon>
         </div>
         <h1 class="title">评茶员初赛理论题库</h1>
         <p class="subtitle">答题用户登录</p>
@@ -69,7 +69,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { User, Lock } from '@element-plus/icons-vue'
+import { Collection, User, Lock } from '@element-plus/icons-vue'
 import { authApi } from '../api'
 import { useUserStore } from '../stores/user'
 
@@ -118,9 +118,11 @@ const handleLogin = async () => {
 <style scoped>
 .login-container {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 50%, #a5d6a7 100%);
   position: relative;
   overflow: hidden;
@@ -217,8 +219,43 @@ const handleLogin = async () => {
   }
 }
 
-/* 自定义图标 */
-:deep(.tea-icon) {
-  font-size: 48px;
+@media (max-width: 640px) {
+  .login-container {
+    align-items: stretch;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  .login-box {
+    align-self: center;
+    padding: 32px 24px;
+    border-radius: 14px;
+  }
+
+  .login-header {
+    margin-bottom: 24px;
+  }
+
+  .logo {
+    margin-bottom: 12px;
+  }
+
+  .title {
+    font-size: 21px;
+    line-height: 1.35;
+  }
+
+  .login-form {
+    margin-top: 20px;
+  }
+
+  .login-btn {
+    min-height: 48px;
+  }
+
+  .tea-leaf {
+    opacity: 0.65;
+    transform: scale(0.75);
+  }
 }
 </style>

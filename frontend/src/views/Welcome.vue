@@ -9,7 +9,7 @@
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
-          <span>{{ userStore.userName }}</span>
+          <span class="user-name">{{ userStore.userName }}</span>
           <el-button type="danger" link @click="handleLogout">
             <el-icon><SwitchButton /></el-icon>
             退出
@@ -389,5 +389,117 @@ onMounted(() => {
 .rule-icon {
   color: #67c23a;
   font-size: 16px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .header-content {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+
+  .brand {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .brand-text {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-info {
+    flex-shrink: 0;
+    gap: 6px;
+  }
+
+  .main-content {
+    padding: 24px 16px;
+  }
+
+  .welcome-card {
+    padding: 32px 24px;
+  }
+
+  .welcome-header,
+  .stats-grid,
+  .action-section {
+    margin-bottom: 28px;
+  }
+
+  .welcome-title {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-content {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .user-info > .el-icon,
+  .user-name {
+    display: none;
+  }
+
+  .main-content {
+    padding: 16px 12px 24px;
+  }
+
+  .welcome-card {
+    padding: 24px 16px;
+    border-radius: 12px;
+  }
+
+  .welcome-header {
+    margin-bottom: 24px;
+  }
+
+  .welcome-title {
+    font-size: 21px;
+    line-height: 1.35;
+  }
+
+  .welcome-subtitle {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    padding: 14px 16px;
+  }
+
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .action-section {
+    margin-bottom: 24px;
+  }
+
+  .action-btn {
+    width: 100%;
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .rules-section {
+    padding: 18px 16px;
+  }
+
+  .rule-item {
+    align-items: flex-start;
+    line-height: 1.6;
+  }
 }
 </style>

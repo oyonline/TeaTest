@@ -222,7 +222,7 @@
     <el-dialog
       v-model="unansweredDialogVisible"
       title="提示"
-      width="400px"
+      width="min(400px, calc(100vw - 32px))"
     >
       <p>您还有 {{ unansweredCount }} 道题未作答，请完成所有题目后系统将自动交卷。</p>
       <template #footer>
@@ -234,7 +234,7 @@
     <el-dialog
       v-model="completeDialogVisible"
       title="考试完成"
-      width="400px"
+      width="min(400px, calc(100vw - 32px))"
       :close-on-click-modal="false"
       :show-close="false"
     >
@@ -885,8 +885,11 @@ onUnmounted(() => {
 
 .option-text {
   flex: 1;
+  min-width: 0;
   font-size: 14px;
   color: #606266;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .answer-icon {
@@ -987,5 +990,246 @@ onUnmounted(() => {
 
 .complete-content p {
   color: #909399;
+}
+
+@media (max-width: 900px) {
+  .header-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+    padding: 10px 16px;
+  }
+
+  .header-left {
+    min-width: 0;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .brand-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-right {
+    grid-column: 1 / -1;
+  }
+
+  .progress-info {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .progress-bar {
+    width: min(240px, 45vw);
+  }
+
+  .main-layout {
+    flex-direction: column;
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .sidebar {
+    position: static;
+    width: 100%;
+    max-height: none;
+    padding: 16px;
+    overflow: visible;
+  }
+
+  .sidebar-header {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .question-grid {
+    grid-template-rows: repeat(2, 40px);
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 40px;
+    gap: 8px;
+    padding-bottom: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .grid-item {
+    width: 40px;
+    min-height: 40px;
+    aspect-ratio: auto;
+  }
+
+  .legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .header-content {
+    padding: 10px 12px;
+    gap: 8px 12px;
+  }
+
+  .header-left {
+    gap: 0;
+  }
+
+  .header-left :deep(.el-divider),
+  .user-name {
+    display: none;
+  }
+
+  .brand-text {
+    font-size: 14px;
+  }
+
+  .timer {
+    gap: 6px;
+    padding: 7px 10px;
+  }
+
+  .timer-label {
+    display: none;
+  }
+
+  .timer-value {
+    font-size: 14px;
+  }
+
+  .progress-text {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .progress-bar {
+    width: min(160px, 44vw);
+  }
+
+  .main-layout {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .sidebar {
+    padding: 14px 12px;
+    border-radius: 10px;
+  }
+
+  .question-grid {
+    margin-bottom: 10px;
+  }
+
+  .question-card {
+    padding: 16px;
+    border-radius: 10px;
+  }
+
+  .question-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .question-no {
+    margin-right: auto;
+    font-size: 15px;
+  }
+
+  .question-text {
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .option-item {
+    align-items: flex-start;
+    min-height: 52px;
+    padding: 12px;
+  }
+
+  .answer-icon {
+    margin-top: 4px;
+  }
+
+  .multiple-choice :deep(.el-checkbox) {
+    align-items: flex-start;
+    white-space: normal;
+  }
+
+  .multiple-choice :deep(.el-checkbox__input) {
+    margin-top: 6px;
+  }
+
+  .multiple-choice :deep(.el-checkbox__label) {
+    align-items: flex-start;
+    min-width: 0;
+    padding-left: 6px;
+    white-space: normal;
+  }
+
+  .submit-section {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .submit-section .el-button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .pagination-section {
+    margin-top: 16px;
+    padding: 12px 4px;
+    overflow: hidden;
+  }
+
+  .pagination-section :deep(.el-pagination) {
+    max-width: 100%;
+    --el-pagination-button-width: 28px;
+    --el-pagination-button-height: 32px;
+    --el-pagination-button-disabled-bg-color: transparent;
+  }
+
+  .pagination-section :deep(.el-pagination__total),
+  .pagination-section :deep(.el-pagination__jump) {
+    display: none;
+  }
+
+  .loading-state {
+    padding: 24px 16px;
+  }
+
+  .complete-content {
+    padding: 12px 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .brand-text {
+    max-width: 150px;
+  }
+
+  .progress-info {
+    gap: 8px;
+  }
+
+  .progress-bar {
+    width: 42vw;
+  }
+
+  .pagination-section :deep(.el-pager li:not(.is-active):not(.more)) {
+    display: none;
+  }
 }
 </style>

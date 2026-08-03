@@ -105,9 +105,11 @@ const handleLogin = async () => {
 <style scoped>
 .login-container {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 50%, #ce93d8 100%);
   position: relative;
   overflow: hidden;
@@ -223,6 +225,46 @@ const handleLogin = async () => {
   }
   50% {
     transform: translateY(-20px) rotate(-45deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .login-container {
+    align-items: stretch;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+
+  .login-box {
+    align-self: center;
+    padding: 32px 24px;
+    border-radius: 14px;
+  }
+
+  .login-header {
+    margin-bottom: 24px;
+  }
+
+  .logo {
+    margin-bottom: 12px;
+  }
+
+  .title {
+    font-size: 21px;
+    line-height: 1.35;
+  }
+
+  .login-form {
+    margin-top: 20px;
+  }
+
+  .login-btn {
+    min-height: 48px;
+  }
+
+  .tea-leaf {
+    opacity: 0.65;
+    transform: scale(0.75) rotate(-45deg);
   }
 }
 </style>

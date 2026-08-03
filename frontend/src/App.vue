@@ -16,11 +16,31 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#app {
+  min-width: 0;
+  min-height: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #f5f7fa;
+  overflow-x: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+img,
+svg {
+  max-width: 100%;
 }
 
 .fade-enter-active,
@@ -71,5 +91,33 @@ body {
 
 .wrong-color {
   color: #f56c6c;
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 16px;
+    border-radius: 10px;
+  }
+
+  .page-title {
+    margin-bottom: 16px;
+    font-size: 20px;
+  }
+
+  .el-message {
+    width: calc(100vw - 32px) !important;
+    min-width: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>

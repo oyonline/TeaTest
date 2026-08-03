@@ -183,7 +183,7 @@
               v-model="searchKeyword"
               placeholder="搜索答题人姓名"
               clearable
-              style="width: 200px"
+              class="search-input"
               @clear="loadRecords"
               @keyup.enter="loadRecords"
             >
@@ -194,54 +194,56 @@
           </div>
         </template>
 
-        <el-table :data="records" stripe style="width: 100%">
-          <el-table-column prop="user_name" label="答题人" width="100" />
-          <el-table-column prop="start_time" label="开始时间" width="160">
-            <template #default="{ row }">
-              {{ formatDate(row.start_time) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="end_time" label="完成时间" width="160">
-            <template #default="{ row }">
-              {{ row.end_time ? formatDate(row.end_time) : '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="duration_seconds" label="总耗时" width="100">
-            <template #default="{ row }">
-              {{ formatDuration(row.duration_seconds) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="completed_count" label="完成题数" width="90" />
-          <el-table-column prop="correct_count" label="正确数" width="80">
-            <template #default="{ row }">
-              <span style="color: #67c23a">{{ row.correct_count }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="wrong_count" label="错误数" width="80">
-            <template #default="{ row }">
-              <span style="color: #f56c6c">{{ row.wrong_count }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="total_score" label="总分" width="80">
-            <template #default="{ row }">
-              <strong>{{ row.total_score }}</strong>
-            </template>
-          </el-table-column>
-          <el-table-column prop="accuracy_rate" label="正确率" width="90">
-            <template #default="{ row }">
-              <el-tag :type="getAccuracyTagType(row.accuracy_rate)" size="small">
-                {{ row.accuracy_rate?.toFixed(2) }}%
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">
-                {{ row.status === 'completed' ? '已完成' : '进行中' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-wrapper">
+          <el-table :data="records" stripe>
+            <el-table-column prop="user_name" label="答题人" width="100" />
+            <el-table-column prop="start_time" label="开始时间" width="160">
+              <template #default="{ row }">
+                {{ formatDate(row.start_time) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="end_time" label="完成时间" width="160">
+              <template #default="{ row }">
+                {{ row.end_time ? formatDate(row.end_time) : '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="duration_seconds" label="总耗时" width="100">
+              <template #default="{ row }">
+                {{ formatDuration(row.duration_seconds) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="completed_count" label="完成题数" width="90" />
+            <el-table-column prop="correct_count" label="正确数" width="80">
+              <template #default="{ row }">
+                <span style="color: #67c23a">{{ row.correct_count }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="wrong_count" label="错误数" width="80">
+              <template #default="{ row }">
+                <span style="color: #f56c6c">{{ row.wrong_count }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="total_score" label="总分" width="80">
+              <template #default="{ row }">
+                <strong>{{ row.total_score }}</strong>
+              </template>
+            </el-table-column>
+            <el-table-column prop="accuracy_rate" label="正确率" width="90">
+              <template #default="{ row }">
+                <el-tag :type="getAccuracyTagType(row.accuracy_rate)" size="small">
+                  {{ row.accuracy_rate?.toFixed(2) }}%
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">
+                  {{ row.status === 'completed' ? '已完成' : '进行中' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
 
         <div class="pagination-wrapper">
           <el-pagination
@@ -585,6 +587,21 @@ onMounted(() => {
   border-radius: 12px;
 }
 
+.search-input {
+  width: 200px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper :deep(.el-table) {
+  min-width: 1030px;
+}
+
 .pagination-wrapper {
   margin-top: 24px;
   display: flex;
@@ -592,8 +609,147 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .header {
+    margin-bottom: 16px;
+  }
+
+  .header-content {
+    padding: 12px 16px;
+  }
+
+  .main-content {
+    padding: 0 16px 32px;
+    gap: 16px;
+  }
+
   .stats-section {
     grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .stat-card :deep(.el-card__body) {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  .stat-value {
+    font-size: 21px;
+  }
+
+  .card-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .import-section :deep(.el-card__body),
+  .records-section :deep(.el-card__body) {
+    padding: 16px;
+  }
+
+  .pagination-wrapper {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-content {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .brand {
+    gap: 8px;
+  }
+
+  .brand-text {
+    font-size: 16px;
+  }
+
+  .header-right .el-button {
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .main-content {
+    padding: 0 12px 24px;
+    gap: 12px;
+  }
+
+  .stats-section {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-card :deep(.el-card__body) {
+    min-height: 76px;
+  }
+
+  .import-section,
+  .records-section {
+    border-radius: 10px;
+  }
+
+  .import-section :deep(.el-card__header),
+  .records-section :deep(.el-card__header) {
+    padding: 14px 16px;
+  }
+
+  .import-form {
+    margin-top: 20px;
+  }
+
+  .import-form :deep(.el-form-item) {
+    display: block;
+    margin-bottom: 20px;
+  }
+
+  .import-form :deep(.el-form-item__label) {
+    width: auto !important;
+    height: auto;
+    margin-bottom: 8px;
+    line-height: 1.4;
+  }
+
+  .import-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+
+  .import-form :deep(.el-radio-group) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .import-form :deep(.el-radio) {
+    min-height: 40px;
+    margin-right: 0;
+  }
+
+  .upload-demo,
+  .upload-demo :deep(.el-upload),
+  .upload-demo :deep(.el-button) {
+    width: 100%;
+  }
+
+  .pagination-wrapper :deep(.el-pagination__total),
+  .pagination-wrapper :deep(.el-pagination__sizes) {
+    display: none;
+  }
+
+  .pagination-wrapper :deep(.el-pagination) {
+    --el-pagination-button-width: 28px;
+    --el-pagination-button-height: 32px;
   }
 }
 </style>

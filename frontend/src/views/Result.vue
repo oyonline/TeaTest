@@ -9,7 +9,7 @@
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
-          <span>{{ userStore.userName }}</span>
+          <span class="user-name">{{ userStore.userName }}</span>
           <el-button type="danger" link @click="handleLogout">
             <el-icon><SwitchButton /></el-icon>
             退出
@@ -383,5 +383,115 @@ onMounted(() => {
   font-size: 18px;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+}
+
+@media (max-width: 768px) {
+  .header-content {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+
+  .brand {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .brand-text {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-info {
+    flex-shrink: 0;
+    gap: 6px;
+  }
+
+  .result-content {
+    padding: 24px 16px;
+  }
+
+  .result-card {
+    padding: 32px 24px;
+  }
+
+  .result-header,
+  .score-section,
+  .stats-grid {
+    margin-bottom: 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-content {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .user-info > .el-icon,
+  .user-name {
+    display: none;
+  }
+
+  .result-content {
+    padding: 16px 12px 24px;
+  }
+
+  .result-card {
+    padding: 24px 16px;
+    border-radius: 12px;
+  }
+
+  .result-header {
+    margin-bottom: 24px;
+  }
+
+  .result-title {
+    font-size: 22px;
+  }
+
+  .result-subtitle {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .score-section {
+    margin-bottom: 24px;
+  }
+
+  .score-circle {
+    width: 136px;
+    height: 136px;
+  }
+
+  .score-value {
+    font-size: 42px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .stat-item {
+    padding: 14px 16px;
+  }
+
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .stat-value {
+    overflow-wrap: anywhere;
+  }
+
+  .action-btn {
+    width: 100%;
+    min-height: 48px;
+    font-size: 16px;
+  }
 }
 </style>
