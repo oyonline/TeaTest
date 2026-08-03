@@ -35,9 +35,32 @@ const routes = [
   },
   {
     path: '/admin',
-    name: 'AdminDashboard',
-    component: () => import('../views/AdminDashboard.vue'),
+    redirect: '/admin/question-banks',
     meta: { requiresAdmin: true }
+  },
+  {
+    path: '/admin/question-banks',
+    name: 'AdminQuestionBanks',
+    component: () => import('../views/AdminDashboard.vue'),
+    meta: { requiresAdmin: true, adminSection: 'banks' }
+  },
+  {
+    path: '/admin/import',
+    name: 'AdminImport',
+    component: () => import('../views/AdminDashboard.vue'),
+    meta: { requiresAdmin: true, adminSection: 'import' }
+  },
+  {
+    path: '/admin/questions',
+    name: 'AdminQuestions',
+    component: () => import('../views/AdminDashboard.vue'),
+    meta: { requiresAdmin: true, adminSection: 'questions' }
+  },
+  {
+    path: '/admin/records',
+    name: 'AdminRecords',
+    component: () => import('../views/AdminDashboard.vue'),
+    meta: { requiresAdmin: true, adminSection: 'records' }
   }
 ]
 

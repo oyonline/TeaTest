@@ -11,29 +11,32 @@
           退出登录
         </el-button>
       </div>
+      <nav class="admin-nav" aria-label="后台功能导航">
+        <RouterLink v-for="item in navItems" :key="item.path" :to="item.path" class="nav-link">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </RouterLink>
+      </nav>
     </header>
 
     <main class="main-content">
-      <section class="stats-section">
-        <el-card v-for="item in statCards" :key="item.key" class="stat-card" shadow="hover">
-          <div class="stat-icon" :class="item.color"><el-icon><component :is="item.icon" /></el-icon></div>
-          <div>
-            <div class="stat-value">{{ stats[item.key] || 0 }}</div>
-            <div class="stat-label">{{ item.label }}</div>
-          </div>
-        </el-card>
+      <section class="page-heading">
+        <div>
+          <h1>{{ currentPage.title }}</h1>
+          <p>{{ currentPage.description }}</p>
+        </div>
       </section>
 
       <el-alert
-        v-if="stats.unclassified_questions > 0"
+        v-if="activeSection === 'questions' && stats.unclassified_questions > 0"
         :title="`还有 ${stats.unclassified_questions} 道历史题目未分类`"
-        description="未分类题目不会显示在用户端，请在下方“题目归类”中完成分配。"
+        description="未分类题目不会显示在用户端，请在本页完成分配。"
         type="warning"
         :closable="false"
         show-icon
       />
 
-      <el-card class="section-card" shadow="never">
+      <el-card v-if="activeSection === 'banks'" class="section-card" shadow="never">
         <template #header>
           <div class="card-header">
             <div class="header-title"><el-icon><Collection /></el-icon><span>题库类型管理</span></div>
@@ -67,7 +70,7 @@
         </div>
       </el-card>
 
-      <el-card class="section-card" shadow="never">
+      <el-card v-if="activeSection === 'import'" class="section-card" shadow="never">
         <template #header>
           <div class="header-title"><el-icon><Upload /></el-icon><span>题库导入</span></div>
         </template>
@@ -113,7 +116,7 @@
         </div>
       </el-card>
 
-      <el-card class="section-card" shadow="never">
+      <el-card v-if="activeSection === 'questions'" class="section-card" shadow="never">
         <template #header>
           <div class="card-header">
             <div class="header-title"><el-icon><Sort /></el-icon><span>题目归类</span></div>
@@ -154,7 +157,7 @@
         </div>
       </el-card>
 
-      <el-card class="section-card" shadow="never">
+      <el-card v-if="activeSection === 'records'" class="section-card" shadow="never">
         <template #header>
           <div class="card-header">
             <div class="header-title"><el-icon><List /></el-icon><span>考试记录</span></div>
@@ -216,29 +219,37 @@
 </template>
 
 <script setup>
-import { computed, markRaw, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  CircleCheck, Collection, Document, List, Plus, Setting,
-  Sort, SwitchButton, Timer, Upload, Warning
+  Collection, List, Plus, Setting, Sort, SwitchButton, Upload
 } from '@element-plus/icons-vue'
 import { adminApi } from '../api'
 import { useAdminStore } from '../stores/admin'
 
+const route = useRoute()
 const router = useRouter()
 const adminStore = useAdminStore()
 const stats = ref({})
 const banks = ref([])
 const banksLoading = ref(false)
 
-const statCards = computed(() => [
-  { key: 'total_questions', label: '题目总量', icon: markRaw(Document), color: 'blue' },
-  { key: 'unclassified_questions', label: '未分类题目', icon: markRaw(Warning), color: 'red' },
-  { key: 'active_banks', label: '启用题库', icon: markRaw(Collection), color: 'purple' },
-  { key: 'completed_exams', label: '已完成考试', icon: markRaw(CircleCheck), color: 'green' },
-  { key: 'in_progress_exams', label: '进行中考试', icon: markRaw(Timer), color: 'orange' }
-])
+const navItems = [
+  { path: '/admin/question-banks', label: '题库类型管理', icon: Collection },
+  { path: '/admin/import', label: '题库导入', icon: Upload },
+  { path: '/admin/questions', label: '题目归类', icon: Sort },
+  { path: '/admin/records', label: '考试记录', icon: List }
+]
+
+const pageDetails = {
+  banks: { title: '题库类型管理', description: '管理具体题库的分类、名称、排序和启用状态' },
+  import: { title: '题库导入', description: '选择具体题库并覆盖或追加导入题目' },
+  questions: { title: '题目归类', description: '查看现有题目并批量调整所属题库' },
+  records: { title: '考试记录', description: '按答题人或题库查询考试结果和进行状态' }
+}
+const activeSection = computed(() => route.meta.adminSection || 'banks')
+const currentPage = computed(() => pageDetails[activeSection.value] || pageDetails.banks)
 
 const bankDialogVisible = ref(false)
 const editingBankId = ref(null)
@@ -301,7 +312,7 @@ const saveBank = async () => {
     else await adminApi.createQuestionBank(bankForm.value)
     ElMessage.success(editingBankId.value ? '题库已更新' : '题库已创建')
     bankDialogVisible.value = false
-    await Promise.all([loadBanks(), loadStats()])
+    await loadBanks()
   } catch (error) {
     console.error('保存题库失败:', error)
   } finally {
@@ -318,7 +329,6 @@ const handleBankStatusChange = async (bank) => {
       status: bank.status
     })
     ElMessage.success(bank.status ? '题库已启用' : '题库已停用')
-    loadStats()
   } catch (error) {
     bank.status = bank.status ? 0 : 1
     console.error('更新状态失败:', error)
@@ -350,7 +360,7 @@ const handleImport = async () => {
     ElMessage.success(`成功导入 ${importResult.value.success_count} 道题`)
     uploadRef.value?.clearFiles()
     importForm.value.file = null
-    await Promise.all([loadStats(), loadBanks(), loadQuestions()])
+    await loadBanks()
   } catch (error) {
     console.error('导入失败:', error)
   } finally { importLoading.value = false }
@@ -424,10 +434,17 @@ const handleLogout = () => {
   router.push('/admin/login')
 }
 
-onMounted(async () => {
-  await Promise.all([loadStats(), loadBanks()])
-  await Promise.all([loadQuestions(), loadRecords()])
-})
+const loadActivePage = async section => {
+  await loadBanks()
+  if (section === 'questions') {
+    await Promise.all([loadStats(), loadQuestions()])
+  } else if (section === 'records') {
+    await loadRecords()
+  }
+}
+
+onMounted(() => loadActivePage(activeSection.value))
+watch(activeSection, section => loadActivePage(section))
 </script>
 
 <style scoped>
@@ -437,17 +454,13 @@ onMounted(async () => {
 .brand, .header-title { display: flex; align-items: center; gap: 9px; }
 .brand-text, .header-title { color: #303133; font-weight: 600; }
 .brand-text { font-size: 18px; }
+.admin-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 1280px; margin: 0 auto; padding: 0 24px; border-top: 1px solid #ebeef5; }
+.nav-link { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 15px 12px 13px; color: #606266; text-decoration: none; border-bottom: 3px solid transparent; transition: color .2s ease, background-color .2s ease, border-color .2s ease; }
+.nav-link:hover { color: #409eff; background: #f5f9ff; }
+.nav-link.router-link-active { color: #409eff; background: #ecf5ff; border-bottom-color: #409eff; font-weight: 600; }
 .main-content { display: flex; flex-direction: column; gap: 24px; max-width: 1280px; margin: 0 auto; padding: 0 24px 40px; }
-.stats-section { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
-.stat-card :deep(.el-card__body) { display: flex; align-items: center; gap: 13px; padding: 18px; }
-.stat-icon { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 11px; font-size: 22px; }
-.stat-icon.blue { color: #2196f3; background: #e3f2fd; }
-.stat-icon.red { color: #f56c6c; background: #fef0f0; }
-.stat-icon.green { color: #4caf50; background: #e8f5e9; }
-.stat-icon.orange { color: #ff9800; background: #fff3e0; }
-.stat-icon.purple { color: #9c27b0; background: #f3e5f5; }
-.stat-value { color: #303133; font-size: 23px; font-weight: 600; }
-.stat-label { margin-top: 3px; color: #909399; font-size: 13px; white-space: nowrap; }
+.page-heading h1 { margin: 0 0 6px; color: #303133; font-size: 26px; }
+.page-heading p { margin: 0; color: #909399; }
 .section-card { border-radius: 12px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .header-actions, .classify-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -466,15 +479,13 @@ onMounted(async () => {
 .pagination-wrapper { display: flex; justify-content: center; margin-top: 22px; overflow-x: auto; }
 .muted { color: #909399; }
 
-@media (max-width: 1000px) {
-  .stats-section { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
 @media (max-width: 768px) {
   .header { margin-bottom: 16px; }
   .header-content { padding: 12px 16px; }
+  .admin-nav { padding: 0 16px; }
+  .nav-link { padding-right: 6px; padding-left: 6px; font-size: 13px; }
   .main-content { gap: 16px; padding: 0 16px 32px; }
-  .stats-section { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .page-heading h1 { font-size: 22px; }
   .card-header { align-items: stretch; flex-direction: column; }
   .header-actions { align-items: stretch; flex-direction: column; }
   .filter-select, .search-input { width: 100%; }
@@ -487,9 +498,9 @@ onMounted(async () => {
 @media (max-width: 480px) {
   .header-content { padding-right: 12px; padding-left: 12px; }
   .brand-text { font-size: 16px; }
+  .admin-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 12px; }
+  .nav-link { padding-top: 11px; padding-bottom: 9px; border-bottom-width: 2px; }
   .main-content { gap: 12px; padding: 0 12px 24px; }
-  .stats-section { grid-template-columns: 1fr; }
-  .stat-card :deep(.el-card__body) { min-height: 72px; }
   .section-card :deep(.el-card__header) { padding: 14px 16px; }
   .form-block :deep(.el-form-item) { display: block; margin-bottom: 20px; }
   .form-block :deep(.el-form-item__label) { width: auto !important; height: auto; margin-bottom: 8px; line-height: 1.4; }
