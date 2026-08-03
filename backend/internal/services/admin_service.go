@@ -32,6 +32,19 @@ type QuestionBankTypeInput struct {
 	Status       int    `json:"status"`
 }
 
+type AdminExamUser struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	Status    int       `json:"status"`
+	ExamCount int64     `json:"exam_count"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ExamUserInput struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
 // AdminService 管理员服务
 type AdminService struct {
 	db *gorm.DB
@@ -73,6 +86,98 @@ func (s *AdminService) InitAdminConfig(password string) error {
 		return nil
 	}
 	return s.db.Create(&models.AdminConfig{AdminPassword: password}).Error
+}
+
+func validateExamUserInput(input *ExamUserInput) error {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Password = strings.TrimSpace(input.Password)
+	if input.Name == "" {
+		return errors.New("答题人姓名不能为空")
+	}
+	if len([]rune(input.Name)) > 50 {
+		return errors.New("答题人姓名不能超过50个字")
+	}
+	if input.Password == "" {
+		return errors.New("登录密码不能为空")
+	}
+	if len([]rune(input.Password)) > 100 {
+		return errors.New("登录密码不能超过100个字符")
+	}
+	return nil
+}
+
+func (s *AdminService) ListExamUsers(page, pageSize int, keyword string) ([]AdminExamUser, int64, error) {
+	keyword = strings.TrimSpace(keyword)
+	query := s.db.Model(&models.ExamUser{})
+	if keyword != "" {
+		query = query.Where("name LIKE ?", "%"+keyword+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var users []models.ExamUser
+	if err := query.Order("created_at DESC, id DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+
+	type examCountRow struct {
+		UserID uint
+		Count  int64
+	}
+	examCounts := make(map[uint]int64, len(users))
+	if len(users) > 0 {
+		userIDs := make([]uint, 0, len(users))
+		for _, user := range users {
+			userIDs = append(userIDs, user.ID)
+		}
+		var countRows []examCountRow
+		if err := s.db.Model(&models.ExamRecord{}).
+			Select("user_id, COUNT(*) AS count").
+			Where("user_id IN ?", userIDs).
+			Group("user_id").
+			Scan(&countRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, row := range countRows {
+			examCounts[row.UserID] = row.Count
+		}
+	}
+
+	result := make([]AdminExamUser, 0, len(users))
+	for _, user := range users {
+		result = append(result, AdminExamUser{
+			ID:        user.ID,
+			Name:      user.Name,
+			Status:    user.Status,
+			ExamCount: examCounts[user.ID],
+			CreatedAt: user.CreatedAt,
+		})
+	}
+	return result, total, nil
+}
+
+func (s *AdminService) CreateExamUser(input ExamUserInput) (*AdminExamUser, error) {
+	if err := validateExamUserInput(&input); err != nil {
+		return nil, err
+	}
+
+	user := models.ExamUser{Name: input.Name, Password: input.Password, Status: 1}
+	if err := s.db.Create(&user).Error; err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return nil, errors.New("该答题人已存在")
+		}
+		return nil, err
+	}
+	return &AdminExamUser{
+		ID:        user.ID,
+		Name:      user.Name,
+		Status:    user.Status,
+		ExamCount: 0,
+		CreatedAt: user.CreatedAt,
+	}, nil
 }
 
 func validateQuestionBankInput(input *QuestionBankTypeInput) error {

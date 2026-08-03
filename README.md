@@ -33,6 +33,7 @@
 
 ### 管理页
 - 仅密码登录
+- 查询答题人、查看答题次数并新增答题账号
 - 固定“竞赛题库 / 考级题库”两类一级分类
 - 新增、编辑、排序、启用或停用具体题库
 - 历史未分类题目批量重新归类
@@ -194,6 +195,8 @@ TeaTest/
 - `GET /api/exam/stats` - 获取考试统计
 
 ### 管理相关
+- `GET /api/admin/users` - 获取答题人列表
+- `POST /api/admin/users` - 新增答题人
 - `GET /api/admin/stats` - 获取题库统计
 - `GET /api/admin/question-banks` - 获取具体题库
 - `POST /api/admin/question-banks` - 新增具体题库
@@ -236,13 +239,7 @@ go build -o tea-exam-server ./cmd/main.go
 
 ### 添加答题用户
 
-直接在 MySQL 中执行：
-
-```sql
-USE tea_exam;
-INSERT INTO exam_users (name, password, status, created_at, updated_at)
-VALUES ('新用户', '密码', 1, NOW(), NOW());
-```
+登录管理后台，进入“答题人管理”，点击“新增答题人”，填写姓名和登录密码后保存。
 
 ### 修改管理员密码
 
@@ -254,7 +251,7 @@ UPDATE admin_config SET admin_password = '新密码', updated_at = NOW();
 ## 注意事项
 
 1. 支持单选题和多选题，题型编码为 `multiple_choice` 时自动识别为多选题
-2. 答题用户账号直接在数据库维护，管理页不提供增删改功能
+2. 管理页支持查询和新增答题用户；停用账号或重置密码仍需直接维护数据库
 3. 密码明文存储（按需求）
 4. 支持多用户同时在线答题
 5. 同一账号可在多个设备登录（不互斥）

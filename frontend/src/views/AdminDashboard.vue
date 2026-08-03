@@ -36,6 +36,33 @@
         show-icon
       />
 
+      <el-card v-if="activeSection === 'users'" class="section-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <div class="header-title"><el-icon><UserFilled /></el-icon><span>答题人管理</span></div>
+            <div class="header-actions">
+              <el-input v-model="userKeyword" placeholder="按姓名查询" clearable class="search-input" @keyup.enter="resetUserPage" @clear="resetUserPage" />
+              <el-button @click="resetUserPage">查询</el-button>
+              <el-button type="primary" @click="openUserDialog"><el-icon><Plus /></el-icon>新增答题人</el-button>
+            </div>
+          </div>
+        </template>
+
+        <div class="table-wrapper users-table">
+          <el-table :data="users" stripe v-loading="usersLoading">
+            <el-table-column prop="name" label="答题人姓名" min-width="180" />
+            <el-table-column prop="exam_count" label="答题次数" width="110" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="创建时间" min-width="180"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
+          </el-table>
+        </div>
+        <div class="pagination-wrapper">
+          <el-pagination v-model:current-page="userPage" v-model:page-size="userPageSize" :total="userTotal" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" @change="loadUsers" />
+        </div>
+      </el-card>
+
       <el-card v-if="activeSection === 'banks'" class="section-card" shadow="never">
         <template #header>
           <div class="card-header">
@@ -215,6 +242,17 @@
         <el-button type="primary" :loading="bankSaving" @click="saveBank">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="userDialogVisible" title="新增答题人" width="min(480px, calc(100vw - 24px))">
+      <el-form :model="userForm" label-width="90px" @keyup.enter="saveUser">
+        <el-form-item label="姓名" required><el-input v-model="userForm.name" maxlength="50" placeholder="请输入答题人姓名" /></el-form-item>
+        <el-form-item label="登录密码" required><el-input v-model="userForm.password" type="password" maxlength="100" placeholder="请输入登录密码" show-password /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="userSaving" @click="saveUser">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -223,7 +261,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Collection, List, Plus, Setting, Sort, SwitchButton, Upload
+  Collection, List, Plus, Setting, Sort, SwitchButton, Upload, UserFilled
 } from '@element-plus/icons-vue'
 import { adminApi } from '../api'
 import { useAdminStore } from '../stores/admin'
@@ -237,6 +275,7 @@ const banksLoading = ref(false)
 
 const navItems = [
   { path: '/admin/question-banks', label: '题库类型管理', icon: Collection },
+  { path: '/admin/users', label: '答题人管理', icon: UserFilled },
   { path: '/admin/import', label: '题库导入', icon: Upload },
   { path: '/admin/questions', label: '题目归类', icon: Sort },
   { path: '/admin/records', label: '考试记录', icon: List }
@@ -244,12 +283,23 @@ const navItems = [
 
 const pageDetails = {
   banks: { title: '题库类型管理', description: '管理具体题库的分类、名称、排序和启用状态' },
+  users: { title: '答题人管理', description: '查看答题账号并新增可以登录答题的人员' },
   import: { title: '题库导入', description: '选择具体题库并覆盖或追加导入题目' },
   questions: { title: '题目归类', description: '查看现有题目并批量调整所属题库' },
   records: { title: '考试记录', description: '按答题人或题库查询考试结果和进行状态' }
 }
 const activeSection = computed(() => route.meta.adminSection || 'banks')
 const currentPage = computed(() => pageDetails[activeSection.value] || pageDetails.banks)
+
+const users = ref([])
+const usersLoading = ref(false)
+const userSaving = ref(false)
+const userDialogVisible = ref(false)
+const userKeyword = ref('')
+const userPage = ref(1)
+const userPageSize = ref(20)
+const userTotal = ref(0)
+const userForm = ref({ name: '', password: '' })
 
 const bankDialogVisible = ref(false)
 const editingBankId = ref(null)
@@ -280,6 +330,38 @@ const recordBankFilter = ref('')
 const searchKeyword = ref('')
 
 const categoryName = code => code === 'competition' ? '竞赛题库' : code === 'certification' ? '考级题库' : '历史未分类'
+
+const loadUsers = async () => {
+  usersLoading.value = true
+  try {
+    const res = await adminApi.getUsers({ page: userPage.value, page_size: userPageSize.value, keyword: userKeyword.value })
+    users.value = res.list || []
+    userTotal.value = res.total || 0
+  } catch (error) { console.error('加载答题人失败:', error) } finally { usersLoading.value = false }
+}
+
+const resetUserPage = () => { userPage.value = 1; return loadUsers() }
+
+const openUserDialog = () => {
+  userForm.value = { name: '', password: '' }
+  userDialogVisible.value = true
+}
+
+const saveUser = async () => {
+  if (!userForm.value.name.trim() || !userForm.value.password.trim()) {
+    ElMessage.warning('请输入答题人姓名和登录密码')
+    return
+  }
+  userSaving.value = true
+  try {
+    await adminApi.createUser(userForm.value)
+    ElMessage.success('答题人已创建')
+    userDialogVisible.value = false
+    await resetUserPage()
+  } catch (error) {
+    console.error('新增答题人失败:', error)
+  } finally { userSaving.value = false }
+}
 
 const loadStats = async () => {
   try { stats.value = await adminApi.getBankStats() } catch (error) { console.error('加载统计失败:', error) }
@@ -435,6 +517,10 @@ const handleLogout = () => {
 }
 
 const loadActivePage = async section => {
+  if (section === 'users') {
+    await loadUsers()
+    return
+  }
   await loadBanks()
   if (section === 'questions') {
     await Promise.all([loadStats(), loadQuestions()])
@@ -454,7 +540,7 @@ watch(activeSection, section => loadActivePage(section))
 .brand, .header-title { display: flex; align-items: center; gap: 9px; }
 .brand-text, .header-title { color: #303133; font-weight: 600; }
 .brand-text { font-size: 18px; }
-.admin-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 1280px; margin: 0 auto; padding: 0 24px; border-top: 1px solid #ebeef5; }
+.admin-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); max-width: 1280px; margin: 0 auto; padding: 0 24px; border-top: 1px solid #ebeef5; }
 .nav-link { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 15px 12px 13px; color: #606266; text-decoration: none; border-bottom: 3px solid transparent; transition: color .2s ease, background-color .2s ease, border-color .2s ease; }
 .nav-link:hover { color: #409eff; background: #f5f9ff; }
 .nav-link.router-link-active { color: #409eff; background: #ecf5ff; border-bottom-color: #409eff; font-weight: 600; }
@@ -475,6 +561,7 @@ watch(activeSection, section => loadActivePage(section))
 .search-input { width: 190px; }
 .table-wrapper { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .table-wrapper :deep(.el-table) { min-width: 820px; }
+.users-table :deep(.el-table) { min-width: 620px; }
 .records-table :deep(.el-table) { min-width: 1190px; }
 .pagination-wrapper { display: flex; justify-content: center; margin-top: 22px; overflow-x: auto; }
 .muted { color: #909399; }

@@ -49,6 +49,10 @@ export const examApi = {
 
 // 管理相关
 export const adminApi = {
+  // 获取和新增答题人
+  getUsers: (params) => request.get('/admin/users', { params }),
+  createUser: (data) => request.post('/admin/users', data),
+
   // 获取题库统计
   getBankStats: () => request.get('/admin/stats'),
 

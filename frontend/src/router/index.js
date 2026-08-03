@@ -45,6 +45,12 @@ const routes = [
     meta: { requiresAdmin: true, adminSection: 'banks' }
   },
   {
+    path: '/admin/users',
+    name: 'AdminUsers',
+    component: () => import('../views/AdminDashboard.vue'),
+    meta: { requiresAdmin: true, adminSection: 'users' }
+  },
+  {
     path: '/admin/import',
     name: 'AdminImport',
     component: () => import('../views/AdminDashboard.vue'),

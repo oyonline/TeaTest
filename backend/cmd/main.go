@@ -90,6 +90,10 @@ func main() {
 	adminGroup := api.Group("/admin")
 	adminGroup.Use(middleware.AdminAuth(cfg.JWT.Secret))
 	{
+		// 答题人管理
+		adminGroup.GET("/users", adminHandler.ListExamUsers)
+		adminGroup.POST("/users", adminHandler.CreateExamUser)
+
 		// 题库统计
 		adminGroup.GET("/stats", adminHandler.GetBankStats)
 		adminGroup.GET("/question-banks", adminHandler.ListQuestionBanks)

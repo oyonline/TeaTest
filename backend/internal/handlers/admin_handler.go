@@ -18,6 +18,37 @@ func NewAdminHandler(adminService *services.AdminService) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
 }
 
+func (h *AdminHandler) ListExamUsers(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	users, total, err := h.adminService.ListExamUsers(page, pageSize, c.Query("keyword"))
+	if err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.Success(c, response.NewPageData(users, total, page, pageSize))
+}
+
+func (h *AdminHandler) CreateExamUser(c *gin.Context) {
+	var req services.ExamUserInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "答题人信息格式错误")
+		return
+	}
+	user, err := h.adminService.CreateExamUser(req)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "答题人创建成功", user)
+}
+
 type ReclassifyQuestionsRequest struct {
 	QuestionIDs     []uint `json:"question_ids"`
 	QuestionBankID  uint   `json:"question_bank_id" binding:"required"`
