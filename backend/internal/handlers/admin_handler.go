@@ -10,69 +10,135 @@ import (
 	"tea-exam/pkg/response"
 )
 
-// AdminHandler 管理员处理器
 type AdminHandler struct {
 	adminService *services.AdminService
 }
 
-// NewAdminHandler 创建管理员处理器
 func NewAdminHandler(adminService *services.AdminService) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
 }
 
-// ImportQuestionsRequest 导入题目请求
-type ImportQuestionsRequest struct {
-	Mode string `json:"mode" binding:"required,oneof=replace append"`
+type ReclassifyQuestionsRequest struct {
+	QuestionIDs     []uint `json:"question_ids"`
+	QuestionBankID  uint   `json:"question_bank_id" binding:"required"`
+	AllUnclassified bool   `json:"all_unclassified"`
 }
 
-// GetExamRecords 获取考试记录列表
+func (h *AdminHandler) ListQuestionBanks(c *gin.Context) {
+	banks, err := h.adminService.ListQuestionBanks()
+	if err != nil {
+		response.ServerError(c, err.Error())
+		return
+	}
+	response.Success(c, banks)
+}
+
+func (h *AdminHandler) CreateQuestionBank(c *gin.Context) {
+	var req services.QuestionBankTypeInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "题库信息格式错误")
+		return
+	}
+	bank, err := h.adminService.CreateQuestionBank(req)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "题库创建成功", bank)
+}
+
+func (h *AdminHandler) UpdateQuestionBank(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "题库ID无效")
+		return
+	}
+	var req services.QuestionBankTypeInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "题库信息格式错误")
+		return
+	}
+	bank, err := h.adminService.UpdateQuestionBank(uint(id), req)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "题库更新成功", bank)
+}
+
 func (h *AdminHandler) GetExamRecords(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	keyword := c.Query("keyword")
-
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 10
 	}
-
-	records, total, err := h.adminService.GetExamRecords(page, pageSize, keyword)
+	records, total, err := h.adminService.GetExamRecords(page, pageSize, c.Query("keyword"), c.Query("question_bank_id"))
 	if err != nil {
-		response.ServerError(c, err.Error())
+		response.BadRequest(c, err.Error())
 		return
 	}
-
 	response.Success(c, response.NewPageData(records, total, page, pageSize))
 }
 
-// GetBankStats 获取题库统计
 func (h *AdminHandler) GetBankStats(c *gin.Context) {
 	stats, err := h.adminService.GetBankStats()
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
 	}
-
 	response.Success(c, stats)
 }
 
-// ImportQuestions 导入题目
+func (h *AdminHandler) ListQuestions(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	questions, total, err := h.adminService.ListQuestions(page, pageSize, c.Query("keyword"), c.Query("question_bank_id"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, response.NewPageData(questions, total, page, pageSize))
+}
+
+func (h *AdminHandler) ReclassifyQuestions(c *gin.Context) {
+	var req ReclassifyQuestionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请选择目标题库")
+		return
+	}
+	count, err := h.adminService.ReclassifyQuestions(req.QuestionIDs, req.QuestionBankID, req.AllUnclassified)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "题目归类成功", gin.H{"updated_count": count})
+}
+
 func (h *AdminHandler) ImportQuestions(c *gin.Context) {
 	mode := c.PostForm("mode")
 	if mode != "replace" && mode != "append" {
-		mode = "replace" // 默认覆盖模式
+		response.BadRequest(c, "导入模式无效")
+		return
 	}
-
-	// 获取上传的文件
+	bankIDValue, err := strconv.ParseUint(c.PostForm("question_bank_id"), 10, 32)
+	if err != nil || bankIDValue == 0 {
+		response.BadRequest(c, "请选择导入的具体题库")
+		return
+	}
 	file, err := c.FormFile("file")
 	if err != nil {
 		response.BadRequest(c, "请上传文件")
 		return
 	}
-
-	// 打开文件
 	openedFile, err := file.Open()
 	if err != nil {
 		response.ServerError(c, "打开文件失败")
@@ -80,32 +146,25 @@ func (h *AdminHandler) ImportQuestions(c *gin.Context) {
 	}
 	defer openedFile.Close()
 
-	// 读取 CSV 数据（自动处理编码）
 	records, err := csvutil.ReadCSVWithEncoding(openedFile)
 	if err != nil {
-		response.Error(c, 400, err.Error())
+		response.BadRequest(c, err.Error())
 		return
 	}
-
 	if len(records) < 2 {
-		response.Error(c, 400, "CSV 文件内容为空或格式错误")
+		response.BadRequest(c, "CSV 文件内容为空或格式错误")
 		return
 	}
-
-	// 解析题目数据
-	questions, result := csvutil.ParseQuestions(records, 1) // 从第2行开始解析（跳过标题行）
-
+	questions, result := csvutil.ParseQuestions(records, 1)
 	if result.SuccessCount == 0 {
 		response.BadRequest(c, "没有有效题目可导入")
 		return
 	}
 
-	// 转换为模型
-	var questionModels []models.QuestionBank
+	questionModels := make([]models.QuestionBank, 0, len(questions))
 	for _, q := range questions {
 		questionModels = append(questionModels, models.QuestionBank{
 			QuestionNo:       q.QuestionNo,
-			BankName:         q.BankName,
 			QuestionTypeCode: q.QuestionTypeCode,
 			QuestionTypeName: q.QuestionTypeName,
 			QuestionText:     q.QuestionText,
@@ -117,13 +176,10 @@ func (h *AdminHandler) ImportQuestions(c *gin.Context) {
 			CorrectAnswer:    q.CorrectAnswer,
 		})
 	}
-
-	// 导入数据库
-	if err := h.adminService.ImportQuestions(questionModels, mode); err != nil {
-		response.ServerError(c, "导入失败: "+err.Error())
+	if err := h.adminService.ImportQuestions(questionModels, mode, uint(bankIDValue)); err != nil {
+		response.BadRequest(c, "导入失败: "+err.Error())
 		return
 	}
-
 	response.SuccessWithMessage(c, "导入成功", gin.H{
 		"success_count": result.SuccessCount,
 		"fail_count":    result.FailCount,

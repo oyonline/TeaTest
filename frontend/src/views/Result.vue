@@ -5,7 +5,7 @@
       <div class="header-content">
         <div class="brand">
           <el-icon :size="24" color="#409eff"><Collection /></el-icon>
-          <span class="brand-text">评茶员初赛理论题库</span>
+          <span class="brand-text">{{ result.question_bank_name || '茶叶理论题库' }}</span>
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
@@ -26,7 +26,9 @@
             <el-icon :size="64" color="#67c23a"><CircleCheckFilled /></el-icon>
           </div>
           <h1 class="result-title">考试完成</h1>
-          <p class="result-subtitle">您已完成本次考试，以下是您的成绩</p>
+          <p class="result-subtitle">
+            {{ result.question_bank_category }} / {{ result.question_bank_name }}
+          </p>
         </div>
 
         <!-- 成绩展示 -->

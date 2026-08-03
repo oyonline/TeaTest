@@ -74,8 +74,10 @@ func main() {
 		userGroup.GET("/auth/me", authHandler.GetCurrentUser)
 
 		// 考试相关
+		userGroup.GET("/exam/question-banks", examHandler.GetQuestionBanks)
 		userGroup.GET("/exam/in-progress", examHandler.GetInProgressExam)
 		userGroup.POST("/exam/start", examHandler.StartExam)
+		userGroup.GET("/exam/:exam_id/info", examHandler.GetExamInfo)
 		userGroup.GET("/exam/questions", examHandler.GetQuestions)
 		userGroup.GET("/exam/all-status", examHandler.GetAllQuestionStatus)
 		userGroup.POST("/exam/:exam_id/answer", examHandler.SubmitAnswer)
@@ -90,9 +92,14 @@ func main() {
 	{
 		// 题库统计
 		adminGroup.GET("/stats", adminHandler.GetBankStats)
+		adminGroup.GET("/question-banks", adminHandler.ListQuestionBanks)
+		adminGroup.POST("/question-banks", adminHandler.CreateQuestionBank)
+		adminGroup.PUT("/question-banks/:id", adminHandler.UpdateQuestionBank)
 
 		// 考试记录
 		adminGroup.GET("/records", adminHandler.GetExamRecords)
+		adminGroup.GET("/questions", adminHandler.ListQuestions)
+		adminGroup.POST("/questions/reclassify", adminHandler.ReclassifyQuestions)
 
 		// 题库导入
 		adminGroup.POST("/questions/import", adminHandler.ImportQuestions)

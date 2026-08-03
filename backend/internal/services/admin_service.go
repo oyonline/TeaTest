@@ -2,22 +2,45 @@ package services
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"tea-exam/internal/models"
 )
+
+type AdminQuestionBank struct {
+	ID            uint      `json:"id"`
+	CategoryCode  string    `json:"category_code"`
+	CategoryName  string    `json:"category_name"`
+	Name          string    `json:"name"`
+	SortOrder     int       `json:"sort_order"`
+	Status        int       `json:"status"`
+	QuestionCount int64     `json:"question_count"`
+	ExamCount     int64     `json:"exam_count"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type QuestionBankTypeInput struct {
+	CategoryCode string `json:"category_code"`
+	Name         string `json:"name"`
+	SortOrder    int    `json:"sort_order"`
+	Status       int    `json:"status"`
+}
 
 // AdminService 管理员服务
 type AdminService struct {
 	db *gorm.DB
 }
 
-// NewAdminService 创建管理员服务
 func NewAdminService(db *gorm.DB) *AdminService {
 	return &AdminService{db: db}
 }
 
-// Login 管理员登录
 func (s *AdminService) Login(password string) error {
 	var config models.AdminConfig
 	err := s.db.First(&config).Error
@@ -27,112 +50,322 @@ func (s *AdminService) Login(password string) error {
 		}
 		return err
 	}
-
 	if config.AdminPassword != password {
 		return errors.New("密码错误")
 	}
-
 	return nil
 }
 
-// GetAdminConfig 获取管理员配置
 func (s *AdminService) GetAdminConfig() (*models.AdminConfig, error) {
 	var config models.AdminConfig
-	err := s.db.First(&config).Error
-	if err != nil {
+	if err := s.db.First(&config).Error; err != nil {
 		return nil, err
 	}
 	return &config, nil
 }
 
-// InitAdminConfig 初始化管理员配置
 func (s *AdminService) InitAdminConfig(password string) error {
 	var count int64
 	if err := s.db.Model(&models.AdminConfig{}).Count(&count).Error; err != nil {
 		return err
 	}
-
 	if count > 0 {
-		return nil // 已存在，不重复初始化
+		return nil
 	}
-
-	config := models.AdminConfig{
-		AdminPassword: password,
-	}
-	return s.db.Create(&config).Error
+	return s.db.Create(&models.AdminConfig{AdminPassword: password}).Error
 }
 
-// GetExamRecords 获取考试记录列表
-func (s *AdminService) GetExamRecords(page, pageSize int, keyword string) ([]models.ExamRecord, int64, error) {
+func validateQuestionBankInput(input *QuestionBankTypeInput) error {
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" {
+		return errors.New("题库名称不能为空")
+	}
+	if input.CategoryCode != models.QuestionBankCategoryCompetition && input.CategoryCode != models.QuestionBankCategoryCertification {
+		return errors.New("一级分类只能选择竞赛题库或考级题库")
+	}
+	if input.Status != 0 && input.Status != 1 {
+		return errors.New("题库状态无效")
+	}
+	return nil
+}
+
+func (s *AdminService) ListQuestionBanks() ([]AdminQuestionBank, error) {
+	var banks []models.QuestionBankType
+	if err := s.db.Order("CASE category_code WHEN 'competition' THEN 0 ELSE 1 END, sort_order ASC, id ASC").Find(&banks).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]AdminQuestionBank, 0, len(banks))
+	for _, bank := range banks {
+		var questionCount int64
+		if err := s.db.Model(&models.QuestionBank{}).Where("question_bank_type_id = ?", bank.ID).Count(&questionCount).Error; err != nil {
+			return nil, err
+		}
+		var examCount int64
+		if err := s.db.Model(&models.ExamRecord{}).Where("question_bank_type_id = ?", bank.ID).Count(&examCount).Error; err != nil {
+			return nil, err
+		}
+		result = append(result, AdminQuestionBank{
+			ID:            bank.ID,
+			CategoryCode:  bank.CategoryCode,
+			CategoryName:  QuestionBankCategoryName(bank.CategoryCode),
+			Name:          bank.Name,
+			SortOrder:     bank.SortOrder,
+			Status:        bank.Status,
+			QuestionCount: questionCount,
+			ExamCount:     examCount,
+			CreatedAt:     bank.CreatedAt,
+			UpdatedAt:     bank.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
+func (s *AdminService) CreateQuestionBank(input QuestionBankTypeInput) (*models.QuestionBankType, error) {
+	if err := validateQuestionBankInput(&input); err != nil {
+		return nil, err
+	}
+	bank := models.QuestionBankType{
+		Code:         fmt.Sprintf("custom-%d", time.Now().UnixNano()),
+		CategoryCode: input.CategoryCode,
+		Name:         input.Name,
+		SortOrder:    input.SortOrder,
+		Status:       input.Status,
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&bank).Error; err != nil {
+			return err
+		}
+		// GORM 会把带 default 标签的零值写成默认值；显式恢复管理员选择的停用状态。
+		if input.Status == 0 {
+			if err := tx.Model(&bank).Update("status", 0).Error; err != nil {
+				return err
+			}
+			bank.Status = 0
+		}
+		return nil
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return nil, errors.New("同一分类下已存在同名题库")
+		}
+		return nil, err
+	}
+	return &bank, nil
+}
+
+func (s *AdminService) UpdateQuestionBank(id uint, input QuestionBankTypeInput) (*models.QuestionBankType, error) {
+	if err := validateQuestionBankInput(&input); err != nil {
+		return nil, err
+	}
+	var bank models.QuestionBankType
+	if err := s.db.First(&bank, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("题库不存在")
+		}
+		return nil, err
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&bank).Updates(map[string]interface{}{
+			"category_code": input.CategoryCode,
+			"name":          input.Name,
+			"sort_order":    input.SortOrder,
+			"status":        input.Status,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.QuestionBank{}).Where("question_bank_type_id = ?", bank.ID).Update("bank_name", input.Name).Error
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return nil, errors.New("同一分类下已存在同名题库")
+		}
+		return nil, err
+	}
+	if err := s.db.First(&bank, id).Error; err != nil {
+		return nil, err
+	}
+	return &bank, nil
+}
+
+// GetExamRecords 获取考试记录，bankFilter 可为具体题库 ID 或 unclassified。
+func (s *AdminService) GetExamRecords(page, pageSize int, keyword, bankFilter string) ([]models.ExamRecord, int64, error) {
 	var records []models.ExamRecord
 	var total int64
-
-	offset := (page - 1) * pageSize
-
 	query := s.db.Model(&models.ExamRecord{})
 	if keyword != "" {
 		query = query.Where("user_name LIKE ?", "%"+keyword+"%")
 	}
-
+	if bankFilter == "unclassified" {
+		query = query.Where("question_bank_type_id IS NULL")
+	} else if bankFilter != "" {
+		bankID, err := strconv.ParseUint(bankFilter, 10, 32)
+		if err != nil {
+			return nil, 0, errors.New("题库筛选条件无效")
+		}
+		query = query.Where("question_bank_type_id = ?", uint(bankID))
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-
-	if err := query.Order("created_at DESC").Limit(pageSize).Offset(offset).Find(&records).Error; err != nil {
+	if err := query.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&records).Error; err != nil {
 		return nil, 0, err
 	}
-
 	return records, total, nil
 }
 
-// GetBankStats 获取题库统计信息
 func (s *AdminService) GetBankStats() (map[string]interface{}, error) {
-	var totalQuestions int64
+	var totalQuestions, unclassifiedQuestions, totalExams, completedExams, inProgressExams, activeBanks int64
 	if err := s.db.Model(&models.QuestionBank{}).Count(&totalQuestions).Error; err != nil {
 		return nil, err
 	}
-
-	// 获取考试记录统计
-	var totalExams int64
-	var completedExams int64
-	var inProgressExams int64
-
-	s.db.Model(&models.ExamRecord{}).Count(&totalExams)
-	s.db.Model(&models.ExamRecord{}).Where("status = 'completed'").Count(&completedExams)
-	s.db.Model(&models.ExamRecord{}).Where("status = 'in_progress'").Count(&inProgressExams)
-
+	if err := s.db.Model(&models.QuestionBank{}).Where("question_bank_type_id IS NULL").Count(&unclassifiedQuestions).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.ExamRecord{}).Count(&totalExams).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.ExamRecord{}).Where("status = 'completed'").Count(&completedExams).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.ExamRecord{}).Where("status = 'in_progress'").Count(&inProgressExams).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.QuestionBankType{}).Where("status = ?", 1).Count(&activeBanks).Error; err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
-		"total_questions":  totalQuestions,
-		"total_exams":      totalExams,
-		"completed_exams":  completedExams,
-		"in_progress_exams": inProgressExams,
+		"total_questions":        totalQuestions,
+		"unclassified_questions": unclassifiedQuestions,
+		"active_banks":           activeBanks,
+		"total_exams":            totalExams,
+		"completed_exams":        completedExams,
+		"in_progress_exams":      inProgressExams,
 	}, nil
 }
 
-// ImportQuestions 导入题目（覆盖模式）
-func (s *AdminService) ImportQuestions(questions []models.QuestionBank, mode string) error {
-	tx := s.db.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	if mode == "replace" {
-		// 覆盖模式：清空旧题库
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.QuestionBank{}).Error; err != nil {
-			tx.Rollback()
+// ImportQuestions 导入题目；覆盖模式只清空选中的具体题库。
+func (s *AdminService) ImportQuestions(questions []models.QuestionBank, mode string, bankID uint) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var bank models.QuestionBankType
+		if err := tx.First(&bank, bankID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("所选题库不存在")
+			}
 			return err
 		}
+		if mode == "replace" {
+			if err := tx.Where("question_bank_type_id = ?", bankID).Delete(&models.QuestionBank{}).Error; err != nil {
+				return err
+			}
+		}
+		for i := range questions {
+			questions[i].QuestionBankTypeID = &bank.ID
+			questions[i].BankName = bank.Name
+		}
+		if len(questions) > 0 {
+			if err := tx.CreateInBatches(questions, 100).Error; err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+					return errors.New("所选题库中存在重复题号，请检查导入文件或改用覆盖模式")
+				}
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ListQuestions 获取管理员题目列表。
+func (s *AdminService) ListQuestions(page, pageSize int, keyword, bankFilter string) ([]models.QuestionBank, int64, error) {
+	var questions []models.QuestionBank
+	var total int64
+	query := s.db.Model(&models.QuestionBank{}).Preload("QuestionBankType")
+	if keyword != "" {
+		query = query.Where("question_text LIKE ? OR CAST(question_no AS CHAR) = ?", "%"+keyword+"%", keyword)
+	}
+	if bankFilter == "unclassified" {
+		query = query.Where("question_bank_type_id IS NULL")
+	} else if bankFilter != "" {
+		bankID, err := strconv.ParseUint(bankFilter, 10, 32)
+		if err != nil {
+			return nil, 0, errors.New("题库筛选条件无效")
+		}
+		query = query.Where("question_bank_type_id = ?", uint(bankID))
+	}
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := query.Order("question_no ASC, id ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&questions).Error; err != nil {
+		return nil, 0, err
+	}
+	return questions, total, nil
+}
+
+// ReclassifyQuestions 批量归类题目；allUnclassified 为 true 时归类全部未分类题目。
+func (s *AdminService) ReclassifyQuestions(questionIDs []uint, bankID uint, allUnclassified bool) (int64, error) {
+	if !allUnclassified && len(questionIDs) == 0 {
+		return 0, errors.New("请选择要归类的题目")
 	}
 
-	// 批量插入新题目
-	if len(questions) > 0 {
-		if err := tx.CreateInBatches(questions, 100).Error; err != nil {
-			tx.Rollback()
+	var updatedCount int64
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var bank models.QuestionBankType
+		if err := tx.First(&bank, bankID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("目标题库不存在")
+			}
 			return err
 		}
-	}
 
-	return tx.Commit().Error
+		query := tx.Model(&models.QuestionBank{})
+		if allUnclassified {
+			query = query.Where("question_bank_type_id IS NULL")
+		} else {
+			query = query.Where("id IN ?", questionIDs)
+		}
+
+		var sourceBankIDs []uint
+		if err := query.Where("question_bank_type_id IS NOT NULL AND question_bank_type_id <> ?", bank.ID).
+			Distinct().Pluck("question_bank_type_id", &sourceBankIDs).Error; err != nil {
+			return err
+		}
+
+		result := query.Updates(map[string]interface{}{
+			"question_bank_type_id": bank.ID,
+			"bank_name":             bank.Name,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		updatedCount = result.RowsAffected
+
+		for _, sourceBankID := range sourceBankIDs {
+			var questionIDs []uint
+			if err := tx.Model(&models.QuestionBank{}).
+				Where("question_bank_type_id = ? AND question_text IS NOT NULL AND question_text != ?", sourceBankID, "").
+				Order("question_no ASC, id ASC").Pluck("id", &questionIDs).Error; err != nil {
+				return err
+			}
+			var records []models.ExamRecord
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("question_bank_type_id = ? AND status = 'in_progress'", sourceBankID).
+				Find(&records).Error; err != nil {
+				return err
+			}
+			for i := range records {
+				if _, err := finalizeExamIfComplete(tx, &records[i], questionIDs); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return 0, errors.New("目标题库中存在相同题号，请调整后重试")
+		}
+		return 0, err
+	}
+	return updatedCount, nil
 }

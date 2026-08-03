@@ -14,11 +14,19 @@ export const authApi = {
 
 // 考试相关
 export const examApi = {
+  // 获取可选择的具体题库
+  getQuestionBanks: () => request.get('/exam/question-banks'),
+
   // 获取进行中的考试
-  getInProgressExam: () => request.get('/exam/in-progress'),
+  getInProgressExam: (questionBankId) => request.get('/exam/in-progress', {
+    params: questionBankId ? { question_bank_id: questionBankId } : {}
+  }),
 
   // 开始考试
-  startExam: () => request.post('/exam/start'),
+  startExam: (questionBankId) => request.post('/exam/start', { question_bank_id: questionBankId }),
+
+  // 获取考试信息
+  getExamInfo: (examId) => request.get(`/exam/${examId}/info`),
 
   // 获取题目列表（带进度）
   getQuestions: (params) => request.get('/exam/questions', { params }),
@@ -44,14 +52,24 @@ export const adminApi = {
   // 获取题库统计
   getBankStats: () => request.get('/admin/stats'),
 
+  // 获取、创建和更新具体题库
+  getQuestionBanks: () => request.get('/admin/question-banks'),
+  createQuestionBank: (data) => request.post('/admin/question-banks', data),
+  updateQuestionBank: (id, data) => request.put(`/admin/question-banks/${id}`, data),
+
   // 获取考试记录
   getExamRecords: (params) => request.get('/admin/records', { params }),
+
+  // 获取题目并批量归类
+  getQuestions: (params) => request.get('/admin/questions', { params }),
+  reclassifyQuestions: (data) => request.post('/admin/questions/reclassify', data),
 
   // 导入题库
   importQuestions: (data) => {
     const formData = new FormData()
     formData.append('file', data.file)
     formData.append('mode', data.mode || 'replace')
+    formData.append('question_bank_id', data.questionBankId)
     return request.post('/admin/questions/import', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'

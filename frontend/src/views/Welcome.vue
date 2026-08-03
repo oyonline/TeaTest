@@ -1,11 +1,10 @@
 <template>
   <div class="welcome-container">
-    <!-- 顶部导航 -->
     <header class="header">
       <div class="header-content">
         <div class="brand">
           <el-icon :size="28" color="#409eff"><Collection /></el-icon>
-          <span class="brand-text">评茶员初赛理论题库</span>
+          <span class="brand-text">茶叶理论题库</span>
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
@@ -18,193 +17,188 @@
       </div>
     </header>
 
-    <!-- 主内容 -->
     <main class="main-content">
-      <div class="welcome-card">
-        <div class="welcome-header">
-          <h1 class="welcome-title">
-            <span v-if="hasInProgress">欢迎回来，{{ userStore.userName }}</span>
-            <span v-else>欢迎，{{ userStore.userName }}</span>
-          </h1>
-          <p class="welcome-subtitle">
-            <span v-if="hasInProgress">您有一场正在进行的考试，点击"继续答题"继续</span>
-            <span v-else>准备好开始您的考试了吗？</span>
-          </p>
+      <section class="welcome-header">
+        <div>
+          <h1>选择题库开始答题</h1>
+          <p>每个题库会单独保存一场进行中的答题记录</p>
         </div>
+        <div class="summary-card">
+          <el-icon><CircleCheck /></el-icon>
+          <div>
+            <strong>{{ completedExams }}</strong>
+            <span>已完成考试</span>
+          </div>
+        </div>
+      </section>
 
-        <!-- 考试统计 -->
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon blue">
-              <el-icon><Document /></el-icon>
+      <el-alert
+        v-if="legacyExam"
+        class="legacy-alert"
+        title="您还有一场历史未分类考试"
+        type="warning"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <div class="legacy-content">
+            <span>已答 {{ legacyExam.answered_count || 0 }} / {{ legacyExam.total_questions || 0 }} 题</span>
+            <el-button type="warning" size="small" @click="continueExam(legacyExam.exam_id)">继续历史考试</el-button>
+          </div>
+        </template>
+      </el-alert>
+
+      <div v-loading="loading" class="bank-sections">
+        <section v-for="group in bankGroups" :key="group.code" class="bank-section">
+          <div class="section-title">
+            <div class="section-icon" :class="group.code">
+              <el-icon><Trophy v-if="group.code === 'competition'" /><Medal v-else /></el-icon>
             </div>
-            <div class="stat-content">
-              <div class="stat-value">{{ totalQuestions }}</div>
-              <div class="stat-label">题库总量</div>
+            <div>
+              <h2>{{ group.name }}</h2>
+              <p>{{ group.code === 'competition' ? '竞赛专项练习' : '职业技能考级练习' }}</p>
             </div>
           </div>
 
-          <div class="stat-card">
-            <div class="stat-icon green">
-              <el-icon><CircleCheck /></el-icon>
-            </div>
-            <div class="stat-content">
-              <div class="stat-value">{{ completedExams }}</div>
-              <div class="stat-label">已完成考试</div>
-            </div>
+          <div class="bank-grid">
+            <article v-for="bank in group.banks" :key="bank.id" class="bank-card">
+              <div class="bank-card-top">
+                <h3>{{ bank.name }}</h3>
+                <el-tag v-if="bank.status !== 1" type="info" size="small">已停用</el-tag>
+                <el-tag v-else-if="bank.has_in_progress" type="warning" size="small">答题中</el-tag>
+                <el-tag v-else type="success" size="small">可答题</el-tag>
+              </div>
+
+              <div class="bank-meta">
+                <span><el-icon><Document /></el-icon>{{ bank.question_count }} 道题</span>
+                <span v-if="bank.has_in_progress"><el-icon><Timer /></el-icon>已答 {{ bank.answered_count }} 题</span>
+              </div>
+
+              <el-progress
+                v-if="bank.has_in_progress && bank.question_count > 0"
+                :percentage="progressOf(bank)"
+                :stroke-width="8"
+                class="bank-progress"
+              />
+
+              <el-button
+                v-if="bank.has_in_progress"
+                type="primary"
+                class="bank-action"
+                @click="continueExam(bank.current_exam_id)"
+              >
+                继续答题
+              </el-button>
+              <el-button
+                v-else
+                type="primary"
+                class="bank-action"
+                :disabled="bank.status !== 1 || bank.question_count === 0"
+                @click="startNewExam(bank)"
+              >
+                {{ bank.question_count === 0 ? '暂无题目' : '开始答题' }}
+              </el-button>
+            </article>
           </div>
+        </section>
 
-          <div v-if="hasInProgress" class="stat-card">
-            <div class="stat-icon orange">
-              <el-icon><Timer /></el-icon>
-            </div>
-            <div class="stat-content">
-              <div class="stat-value">{{ answeredCount }}</div>
-              <div class="stat-label">已答题数</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="action-section">
-          <el-button
-            v-if="hasInProgress"
-            type="primary"
-            size="large"
-            class="action-btn"
-            @click="continueExam"
-          >
-            <el-icon><VideoPlay /></el-icon>
-            继续答题
-          </el-button>
-
-          <el-button
-            v-else
-            type="primary"
-            size="large"
-            class="action-btn"
-            @click="startNewExam"
-          >
-            <el-icon><VideoPlay /></el-icon>
-            开始答题
-          </el-button>
-        </div>
-
-        <!-- 考试规则说明 -->
-        <div class="rules-section">
-          <h3 class="rules-title">
-            <el-icon><InfoFilled /></el-icon>
-            考试规则
-          </h3>
-          <div class="rules-list">
-            <div class="rule-item">
-              <el-icon class="rule-icon"><Check /></el-icon>
-              <span>共 {{ totalQuestions }} 道单选题，每题 1 分，满分 {{ totalQuestions }} 分</span>
-            </div>
-            <div class="rule-item">
-              <el-icon class="rule-icon"><Check /></el-icon>
-              <span>不限制总答题时长，可随时中断并继续</span>
-            </div>
-            <div class="rule-item">
-              <el-icon class="rule-icon"><Check /></el-icon>
-              <span>一旦选择答案，本题立即锁定，不能再修改</span>
-            </div>
-            <div class="rule-item">
-              <el-icon class="rule-icon"><Check /></el-icon>
-              <span>答完所有题目后自动提交，无需手动交卷</span>
-            </div>
-            <div class="rule-item">
-              <el-icon class="rule-icon"><Check /></el-icon>
-              <span>支持分页查看和跳转到指定页面</span>
-            </div>
-          </div>
-        </div>
+        <el-empty v-if="!loading && banks.length === 0" description="暂无可用题库，请联系管理员" />
       </div>
+
+      <section class="rules-section">
+        <h3><el-icon><InfoFilled /></el-icon>答题规则</h3>
+        <div class="rules-grid">
+          <span><el-icon><Check /></el-icon>进入题库后回答该题库的全部题目</span>
+          <span><el-icon><Check /></el-icon>不限时，可随时中断并继续</span>
+          <span><el-icon><Check /></el-icon>答案提交后立即锁定</span>
+          <span><el-icon><Check /></el-icon>答完全部题目后自动结算</span>
+        </div>
+      </section>
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Collection, User, SwitchButton, Document,
-  CircleCheck, Timer, VideoPlay, InfoFilled, Check
+  Check, CircleCheck, Collection, Document, InfoFilled,
+  Medal, SwitchButton, Timer, Trophy, User
 } from '@element-plus/icons-vue'
 import { examApi } from '../api'
 import { useUserStore } from '../stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
-
-const hasInProgress = ref(false)
-const totalQuestions = ref(500)
+const loading = ref(true)
+const banks = ref([])
 const completedExams = ref(0)
-const answeredCount = ref(0)
-const currentExamId = ref(null)
+const legacyExam = ref(null)
 
-// 获取考试统计
-const loadStats = async () => {
+const bankGroups = computed(() => [
+  {
+    code: 'competition',
+    name: '竞赛题库',
+    banks: banks.value.filter(bank => bank.category_code === 'competition')
+  },
+  {
+    code: 'certification',
+    name: '考级题库',
+    banks: banks.value.filter(bank => bank.category_code === 'certification')
+  }
+].filter(group => group.banks.length > 0))
+
+const progressOf = (bank) => {
+  if (!bank.question_count) return 0
+  return Math.min(100, Math.round((bank.answered_count / bank.question_count) * 100))
+}
+
+const loadData = async () => {
+  loading.value = true
   try {
-    const res = await examApi.getExamStats()
-    totalQuestions.value = res.total_questions || 500
-    completedExams.value = res.completed_exams || 0
-    hasInProgress.value = res.has_in_progress || false
-
-    if (hasInProgress.value) {
-      answeredCount.value = res.answered_count || 0
-      currentExamId.value = res.current_exam_id
-    }
+    const [bankList, stats] = await Promise.all([
+      examApi.getQuestionBanks(),
+      examApi.getExamStats()
+    ])
+    banks.value = bankList || []
+    completedExams.value = stats.completed_exams || 0
+    legacyExam.value = stats.legacy_in_progress || null
   } catch (error) {
-    console.error('获取统计失败:', error)
+    console.error('加载题库失败:', error)
+  } finally {
+    loading.value = false
   }
 }
 
-// 开始新考试
-const startNewExam = async () => {
+const startNewExam = async (bank) => {
   try {
     await ElMessageBox.confirm(
-      '确定要开始新的考试吗？',
-      '提示',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'info'
-      }
+      `确定开始“${bank.name}”吗？本题库共 ${bank.question_count} 道题。`,
+      '开始答题',
+      { confirmButtonText: '开始', cancelButtonText: '取消', type: 'info' }
     )
-
-    const res = await examApi.startExam()
+    const res = await examApi.startExam(bank.id)
     ElMessage.success('考试开始')
-    router.push({
-      path: '/exam',
-      query: { exam_id: res.exam_id }
-    })
+    continueExam(res.exam_id)
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error !== 'cancel' && error !== 'close') {
       console.error('开始考试失败:', error)
     }
   }
 }
 
-// 继续考试
-const continueExam = () => {
-  router.push({
-    path: '/exam',
-    query: { exam_id: currentExamId.value }
-  })
+const continueExam = (examId) => {
+  router.push({ path: '/exam', query: { exam_id: examId } })
 }
 
-// 退出登录
 const handleLogout = () => {
   userStore.logout()
   ElMessage.success('已退出登录')
   router.push('/')
 }
 
-onMounted(() => {
-  loadStats()
-})
+onMounted(loadData)
 </script>
 
 <style scoped>
@@ -213,224 +207,259 @@ onMounted(() => {
   background: #f5f7fa;
 }
 
-/* 顶部导航 */
 .header {
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   position: sticky;
   top: 0;
   z-index: 100;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   max-width: 1200px;
   margin: 0 auto;
   padding: 16px 24px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand-text {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-
+.brand,
 .user-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.brand-text {
+  color: #303133;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.user-info {
   color: #606266;
 }
 
-/* 主内容 */
 .main-content {
-  max-width: 800px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 40px 24px;
-}
-
-.welcome-card {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  padding: 48px;
+  padding: 36px 24px 48px;
 }
 
 .welcome-header {
-  text-align: center;
-  margin-bottom: 40px;
-}
-
-.welcome-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 12px;
-}
-
-.welcome-subtitle {
-  font-size: 16px;
-  color: #606266;
-}
-
-/* 统计卡片 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 20px;
-  margin-bottom: 40px;
-}
-
-.stat-card {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
-  background: #f5f7fa;
-  border-radius: 12px;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
 }
 
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.stat-icon.blue {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.stat-icon.green {
-  background: #e8f5e9;
-  color: #388e3c;
-}
-
-.stat-icon.orange {
-  background: #fff3e0;
-  color: #f57c00;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
+.welcome-header h1 {
+  margin: 0 0 8px;
   color: #303133;
+  font-size: 30px;
 }
 
-.stat-label {
-  font-size: 14px;
+.welcome-header p,
+.section-title p {
+  margin: 0;
   color: #909399;
-  margin-top: 4px;
 }
 
-/* 操作按钮 */
-.action-section {
-  text-align: center;
-  margin-bottom: 40px;
-}
-
-.action-btn {
-  width: 200px;
-  height: 52px;
-  font-size: 18px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
-  transition: all 0.3s ease;
-}
-
-.action-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(64, 158, 255, 0.4);
-}
-
-/* 规则说明 */
-.rules-section {
-  background: #f5f7fa;
-  border-radius: 12px;
-  padding: 24px;
-}
-
-.rules-title {
+.summary-card {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
+  gap: 12px;
+  min-width: 160px;
+  padding: 16px 20px;
+  color: #67c23a;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.summary-card > .el-icon {
+  font-size: 30px;
+}
+
+.summary-card strong,
+.summary-card span {
+  display: block;
+}
+
+.summary-card strong {
+  font-size: 24px;
+}
+
+.summary-card span {
+  color: #909399;
+  font-size: 13px;
+}
+
+.legacy-alert {
+  margin-bottom: 24px;
+}
+
+.legacy-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bank-sections {
+  min-height: 200px;
+}
+
+.bank-section {
+  margin-bottom: 30px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   margin-bottom: 16px;
 }
 
-.rules-list {
+.section-title h2 {
+  margin: 0 0 3px;
+  color: #303133;
+  font-size: 21px;
+}
+
+.section-title p {
+  font-size: 13px;
+}
+
+.section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 23px;
+}
+
+.section-icon.competition {
+  color: #e6a23c;
+  background: #fdf6ec;
+}
+
+.section-icon.certification {
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+.bank-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.bank-card {
   display: flex;
   flex-direction: column;
+  min-height: 188px;
+  padding: 22px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.04);
+}
+
+.bank-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.rule-item {
+.bank-card h3 {
+  margin: 0;
+  color: #303133;
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.bank-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 18px 0;
+  color: #909399;
+  font-size: 14px;
+}
+
+.bank-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bank-progress {
+  margin: -2px 0 16px;
+}
+
+.bank-action {
+  width: 100%;
+  min-height: 42px;
+  margin: auto 0 0;
+}
+
+.rules-section {
+  padding: 24px;
+  background: #fff;
+  border-radius: 14px;
+}
+
+.rules-section h3 {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  margin: 0 0 18px;
+  color: #303133;
+  font-size: 17px;
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
   color: #606266;
   font-size: 14px;
 }
 
-.rule-icon {
-  color: #67c23a;
-  font-size: 16px;
+.rules-grid span {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.6;
+}
+
+.rules-grid .el-icon {
   flex-shrink: 0;
+  margin-top: 4px;
+  color: #67c23a;
 }
 
 @media (max-width: 768px) {
   .header-content {
     padding: 12px 16px;
-    gap: 12px;
-  }
-
-  .brand {
-    min-width: 0;
-    gap: 8px;
-  }
-
-  .brand-text {
-    overflow: hidden;
-    font-size: 16px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .user-info {
-    flex-shrink: 0;
-    gap: 6px;
   }
 
   .main-content {
-    padding: 24px 16px;
+    padding: 24px 16px 36px;
   }
 
-  .welcome-card {
-    padding: 32px 24px;
+  .welcome-header h1 {
+    font-size: 25px;
   }
 
-  .welcome-header,
-  .stats-grid,
-  .action-section {
-    margin-bottom: 28px;
-  }
-
-  .welcome-title {
-    font-size: 24px;
+  .bank-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -440,66 +469,57 @@ onMounted(() => {
     padding-left: 12px;
   }
 
+  .brand-text {
+    font-size: 16px;
+  }
+
   .user-info > .el-icon,
   .user-name {
     display: none;
   }
 
   .main-content {
-    padding: 16px 12px 24px;
-  }
-
-  .welcome-card {
-    padding: 24px 16px;
-    border-radius: 12px;
+    padding: 20px 12px 28px;
   }
 
   .welcome-header {
-    margin-bottom: 24px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
   }
 
-  .welcome-title {
-    font-size: 21px;
-    line-height: 1.35;
+  .welcome-header h1 {
+    font-size: 22px;
   }
 
-  .welcome-subtitle {
-    font-size: 14px;
-    line-height: 1.6;
+  .summary-card {
+    min-width: 0;
   }
 
-  .stats-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
-    margin-bottom: 24px;
+  .legacy-content {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .stat-card {
-    padding: 14px 16px;
-  }
-
-  .stat-icon {
-    width: 44px;
-    height: 44px;
-  }
-
-  .action-section {
-    margin-bottom: 24px;
-  }
-
-  .action-btn {
+  .legacy-content .el-button {
     width: 100%;
-    min-height: 48px;
+  }
+
+  .bank-card {
+    min-height: 176px;
+    padding: 18px 16px;
+  }
+
+  .bank-card h3 {
     font-size: 16px;
   }
 
   .rules-section {
-    padding: 18px 16px;
+    padding: 20px 16px;
   }
 
-  .rule-item {
-    align-items: flex-start;
-    line-height: 1.6;
+  .rules-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

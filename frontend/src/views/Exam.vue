@@ -6,7 +6,7 @@
         <div class="header-left">
           <div class="brand">
             <el-icon :size="24" color="#409eff"><Collection /></el-icon>
-            <span class="brand-text">评茶员初赛理论题库</span>
+            <span class="brand-text">{{ examInfo.question_bank_name || '茶叶理论题库' }}</span>
           </div>
           <el-divider direction="vertical" />
           <div class="user-name">
@@ -56,10 +56,10 @@
               {
                 'answered-correct': item.status === 'correct',
                 'answered-wrong': item.status === 'wrong',
-                'current-page': isQuestionInCurrentPage(item.question_no)
+                'current-page': isQuestionInCurrentPage(item.position)
               }
             ]"
-            @click="jumpToQuestionPage(item.question_no)"
+            @click="jumpToQuestionPage(item.position, item.question_id)"
           >
             {{ item.question_no }}
           </div>
@@ -90,7 +90,7 @@
           <div
             v-for="question in questions"
             :key="question.id"
-            :id="`question-${question.question_no}`"
+            :id="`question-${question.id}`"
             class="question-card"
           >
             <div class="question-header">
@@ -250,7 +250,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
   Collection, User, Timer, Grid,
   CircleCheck, CircleClose, CircleCheckFilled
@@ -271,6 +271,7 @@ const pageSize = ref(10)
 const totalPages = ref(50)
 
 const examId = ref(null)
+const examInfo = ref({})
 const startTime = ref(null)
 const elapsedSeconds = ref(0)
 const timerInterval = ref(null)
@@ -308,10 +309,10 @@ const getOptions = (question) => {
 }
 
 // 判断题目是否在当前页
-const isQuestionInCurrentPage = (questionNo) => {
+const isQuestionInCurrentPage = (position) => {
   const pageStart = (currentPage.value - 1) * pageSize.value + 1
   const pageEnd = currentPage.value * pageSize.value
-  return questionNo >= pageStart && questionNo <= pageEnd
+  return position >= pageStart && position <= pageEnd
 }
 
 // 加载题目
@@ -377,6 +378,7 @@ const selectAnswer = async (question, answer) => {
     question.user_answer = answer
     question.is_correct = res.is_correct
     question.is_locked = true
+    question.correct_answer = res.correct_answer
 
     // 刷新状态列表
     await loadQuestionStatus()
@@ -447,6 +449,7 @@ const submitMultipleChoice = async (question) => {
     question.user_answer = answer
     question.is_correct = res.is_correct
     question.is_locked = true
+    question.correct_answer = res.correct_answer
 
     // 刷新状态列表
     await loadQuestionStatus()
@@ -472,8 +475,8 @@ const submitMultipleChoice = async (question) => {
 }
 
 // 跳转到题目所在页
-const jumpToQuestionPage = (questionNo) => {
-  const targetPage = Math.ceil(questionNo / pageSize.value)
+const jumpToQuestionPage = (position, questionId) => {
+  const targetPage = Math.ceil(position / pageSize.value)
   if (targetPage !== currentPage.value) {
     currentPage.value = targetPage
     handlePageChange()
@@ -481,7 +484,7 @@ const jumpToQuestionPage = (questionNo) => {
 
   // 滚动到题目位置
   setTimeout(() => {
-    const element = document.getElementById(`question-${questionNo}`)
+    const element = document.getElementById(`question-${questionId}`)
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
@@ -535,11 +538,16 @@ onMounted(async () => {
     return
   }
 
-  // 获取考试信息
+  // 获取当前考试信息
   try {
-    const examInfo = await examApi.getInProgressExam()
-    if (examInfo.has_in_progress) {
-      startTime.value = examInfo.start_time
+    const info = await examApi.getExamInfo(examId.value)
+    examInfo.value = info
+    if (info.status === 'completed') {
+      router.replace(`/result/${examId.value}`)
+      return
+    }
+    if (info.start_time) {
+      startTime.value = info.start_time
       startTimer()
     }
   } catch (error) {
