@@ -56,6 +56,9 @@
               <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag></template>
             </el-table-column>
             <el-table-column label="创建时间" min-width="180"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }"><el-button type="primary" link :aria-label="`重置${row.name}的密码`" @click="openResetPasswordDialog(row)">重置密码</el-button></template>
+            </el-table-column>
           </el-table>
         </div>
         <div class="pagination-wrapper">
@@ -253,6 +256,18 @@
         <el-button type="primary" :loading="userSaving" @click="saveUser">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="resetPasswordDialogVisible" title="重置密码" width="min(480px, calc(100vw - 24px))" :close-on-click-modal="!resetPasswordSaving" :close-on-press-escape="!resetPasswordSaving" :show-close="!resetPasswordSaving" @closed="clearResetPasswordForm">
+      <el-form :model="resetPasswordForm" label-width="90px" @keyup.enter="saveResetPassword">
+        <el-form-item label="答题人"><span>{{ resetPasswordForm.name }}</span></el-form-item>
+        <el-form-item label="新密码" required><el-input v-model="resetPasswordForm.password" type="password" maxlength="72" placeholder="请输入新密码" autocomplete="new-password" show-password :disabled="resetPasswordSaving" /></el-form-item>
+        <el-form-item label="确认密码" required><el-input v-model="resetPasswordForm.confirmPassword" type="password" maxlength="72" placeholder="请再次输入新密码" autocomplete="new-password" show-password :disabled="resetPasswordSaving" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="resetPasswordSaving" @click="resetPasswordDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="resetPasswordSaving" @click="saveResetPassword">确认重置</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -283,7 +298,7 @@ const navItems = [
 
 const pageDetails = {
   banks: { title: '题库类型管理', description: '管理具体题库的分类、名称、排序和启用状态' },
-  users: { title: '答题人管理', description: '查看答题账号并新增可以登录答题的人员' },
+  users: { title: '答题人管理', description: '查看、新增答题账号并重置登录密码' },
   import: { title: '题库导入', description: '选择具体题库并覆盖或追加导入题目' },
   questions: { title: '题目归类', description: '查看现有题目并批量调整所属题库' },
   records: { title: '考试记录', description: '按答题人或题库查询考试结果和进行状态' }
@@ -300,6 +315,9 @@ const userPage = ref(1)
 const userPageSize = ref(20)
 const userTotal = ref(0)
 const userForm = ref({ name: '', password: '' })
+const resetPasswordDialogVisible = ref(false)
+const resetPasswordSaving = ref(false)
+const resetPasswordForm = ref({ id: null, name: '', password: '', confirmPassword: '' })
 
 const bankDialogVisible = ref(false)
 const editingBankId = ref(null)
@@ -361,6 +379,40 @@ const saveUser = async () => {
   } catch (error) {
     console.error('新增答题人失败:', error)
   } finally { userSaving.value = false }
+}
+
+const clearResetPasswordForm = () => {
+  resetPasswordForm.value = { id: null, name: '', password: '', confirmPassword: '' }
+}
+
+const openResetPasswordDialog = user => {
+  resetPasswordForm.value = { id: user.id, name: user.name, password: '', confirmPassword: '' }
+  resetPasswordDialogVisible.value = true
+}
+
+const saveResetPassword = async () => {
+  if (resetPasswordSaving.value || !resetPasswordForm.value.id) return
+  const { id, password, confirmPassword } = resetPasswordForm.value
+  if (!password.trim()) {
+    ElMessage.warning('请输入新密码')
+    return
+  }
+  if (new TextEncoder().encode(password).length > 72) {
+    ElMessage.warning('新密码不能超过72个字节')
+    return
+  }
+  if (password !== confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致')
+    return
+  }
+  resetPasswordSaving.value = true
+  try {
+    await adminApi.resetUserPassword(id, { password, confirm_password: confirmPassword })
+    ElMessage.success('密码已重置')
+    resetPasswordDialogVisible.value = false
+  } catch {
+    return
+  } finally { resetPasswordSaving.value = false }
 }
 
 const loadStats = async () => {

@@ -52,6 +52,7 @@ export const adminApi = {
   // 获取和新增答题人
   getUsers: (params) => request.get('/admin/users', { params }),
   createUser: (data) => request.post('/admin/users', data),
+  resetUserPassword: (id, data) => request.post(`/admin/users/${id}/reset-password`, data),
 
   // 获取题库统计
   getBankStats: () => request.get('/admin/stats'),

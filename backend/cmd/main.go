@@ -99,6 +99,7 @@ func main() {
 		// 答题人管理
 		adminGroup.GET("/users", adminHandler.ListExamUsers)
 		adminGroup.POST("/users", adminHandler.CreateExamUser)
+		adminGroup.POST("/users/:id/reset-password", adminHandler.ResetExamUserPassword)
 
 		// 题库统计
 		adminGroup.GET("/stats", adminHandler.GetBankStats)

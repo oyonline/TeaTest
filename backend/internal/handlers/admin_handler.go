@@ -49,6 +49,24 @@ func (h *AdminHandler) CreateExamUser(c *gin.Context) {
 	response.SuccessWithMessage(c, "答题人创建成功", user)
 }
 
+func (h *AdminHandler) ResetExamUserPassword(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "答题人ID无效")
+		return
+	}
+	var req services.ResetExamUserPasswordInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "重置密码信息格式错误")
+		return
+	}
+	if err := h.adminService.ResetExamUserPassword(uint(id), req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "密码已重置", nil)
+}
+
 type ReclassifyQuestionsRequest struct {
 	QuestionIDs     []uint `json:"question_ids"`
 	QuestionBankID  uint   `json:"question_bank_id" binding:"required"`

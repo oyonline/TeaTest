@@ -46,6 +46,11 @@ type ExamUserInput struct {
 	Password string `json:"password"`
 }
 
+type ResetExamUserPasswordInput struct {
+	Password        string `json:"password"`
+	ConfirmPassword string `json:"confirm_password"`
+}
+
 // AdminService 管理员服务
 type AdminService struct {
 	db *gorm.DB
@@ -196,6 +201,47 @@ func (s *AdminService) CreateExamUser(input ExamUserInput) (*AdminExamUser, erro
 		ExamCount: 0,
 		CreatedAt: user.CreatedAt,
 	}, nil
+}
+
+func validateResetExamUserPasswordInput(input ResetExamUserPasswordInput) error {
+	if strings.TrimSpace(input.Password) == "" {
+		return errors.New("新密码不能为空")
+	}
+	if !security.CanHashPassword(input.Password) {
+		return errors.New("新密码不能超过72个字节")
+	}
+	if input.Password != input.ConfirmPassword {
+		return errors.New("两次输入的密码不一致")
+	}
+	return nil
+}
+
+func (s *AdminService) ResetExamUserPassword(id uint, input ResetExamUserPasswordInput) error {
+	if id == 0 {
+		return errors.New("答题人ID无效")
+	}
+	if err := validateResetExamUserPasswordInput(input); err != nil {
+		return err
+	}
+	var user models.ExamUser
+	if err := s.db.First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("答题人不存在")
+		}
+		return err
+	}
+	hash, err := security.HashPassword(input.Password)
+	if err != nil {
+		return err
+	}
+	result := s.db.Model(&user).Update("password", hash)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("答题人不存在")
+	}
+	return nil
 }
 
 func validateQuestionBankInput(input *QuestionBankTypeInput) error {
