@@ -460,6 +460,31 @@ func TestStage2MySQL(t *testing.T) {
 	if shortCSV.CorrectAnswer != "参考第一行\n参考第二行" {
 		t.Fatalf("CSV 多行参考答案未保留: %q", shortCSV.CorrectAnswer)
 	}
+
+	// 专用类增量：不建默认库、不自动授权；仅授权 special 的用户 practice 可见且可用，tea 不可开始。
+	specialBank := mustBank(t, adminSvc, models.QuestionBankCategorySpecial, "专用类最小场景")
+	specialUser := mustUser(t, adminSvc, "阶段2专用类用户")
+	beforeGrant, err := examSvc.GetQuestionBanksForEntry(specialUser.ID, services.EntryPractice)
+	if err != nil || len(beforeGrant) != 0 {
+		t.Fatalf("新建用户未授权时 practice 应为空: %+v err=%v", beforeGrant, err)
+	}
+	grantBanks(t, adminSvc, specialUser.ID, specialBank)
+	practiceSpecial, err := examSvc.GetQuestionBanksForEntry(specialUser.ID, services.EntryPractice)
+	if err != nil || len(practiceSpecial) != 1 || practiceSpecial[0].ID != specialBank.ID || practiceSpecial[0].CategoryCode != models.QuestionBankCategorySpecial {
+		t.Fatalf("仅授权专用类后 practice 应恰好返回该库: %+v err=%v", practiceSpecial, err)
+	}
+	teaSpecial, err := examSvc.GetQuestionBanksForEntry(specialUser.ID, services.EntryTea)
+	if err != nil || len(teaSpecial) != 0 {
+		t.Fatalf("专用类不应出现在 tea 入口: %+v err=%v", teaSpecial, err)
+	}
+	specialQuestion := mustQuestion(t, db, specialBank.ID, 1, models.QuestionTypeFillBlank, "专用类文字题", "", "", "专用\n答案")
+	if _, err := examSvc.StartExamForEntry(specialUser.ID, specialUser.Name, specialBank.ID, services.EntryTea); err == nil {
+		t.Fatal("专用类题库不应允许从 tea 入口开始")
+	}
+	specialExam := mustStart(t, examSvc, specialUser, specialBank, services.EntryPractice)
+	if _, _, completed, _, err := examSvc.SubmitAnswer(specialExam.ID, specialUser.ID, specialQuestion.ID, "专用\n答案"); err != nil || !completed {
+		t.Fatalf("专用类文字题提交后应完成: completed=%v err=%v", completed, err)
+	}
 }
 
 func mustBank(t *testing.T, svc *services.AdminService, category, name string) models.QuestionBankType {

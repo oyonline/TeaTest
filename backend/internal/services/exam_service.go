@@ -50,6 +50,8 @@ func QuestionBankCategoryName(code string) string {
 		return "考级题库"
 	case models.QuestionBankCategoryGeneral:
 		return "通用题库"
+	case models.QuestionBankCategorySpecial:
+		return "专用类"
 	default:
 		return "历史未分类"
 	}

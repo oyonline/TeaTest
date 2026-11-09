@@ -245,6 +245,7 @@
             <el-option label="竞赛题库" value="competition" />
             <el-option label="考级题库" value="certification" />
             <el-option label="通用题库" value="general" />
+            <el-option label="专用类" value="special" />
           </el-select>
         </el-form-item>
         <el-form-item label="题库名称" required><el-input v-model="bankForm.name" maxlength="100" show-word-limit /></el-form-item>
@@ -383,7 +384,7 @@ const recordTotal = ref(0)
 const recordBankFilter = ref('')
 const searchKeyword = ref('')
 
-const categoryName = code => code === 'competition' ? '竞赛题库' : code === 'certification' ? '考级题库' : code === 'general' ? '通用题库' : '历史未分类'
+const categoryName = code => code === 'competition' ? '竞赛题库' : code === 'certification' ? '考级题库' : code === 'general' ? '通用题库' : code === 'special' ? '专用类' : '历史未分类'
 
 const loadUsers = async () => {
   usersLoading.value = true

@@ -251,8 +251,9 @@ func validateQuestionBankInput(input *QuestionBankTypeInput) error {
 	}
 	if input.CategoryCode != models.QuestionBankCategoryCompetition &&
 		input.CategoryCode != models.QuestionBankCategoryCertification &&
-		input.CategoryCode != models.QuestionBankCategoryGeneral {
-		return errors.New("一级分类只能选择竞赛题库、考级题库或通用题库")
+		input.CategoryCode != models.QuestionBankCategoryGeneral &&
+		input.CategoryCode != models.QuestionBankCategorySpecial {
+		return errors.New("一级分类只能选择竞赛题库、考级题库、通用题库或专用类")
 	}
 	if input.Status != 0 && input.Status != 1 {
 		return errors.New("题库状态无效")

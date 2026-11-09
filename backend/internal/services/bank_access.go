@@ -34,7 +34,7 @@ func ParseEntry(value string) (string, error) {
 // EntryCategoryCodes 返回入口允许展示的一级分类。入口只能收窄，不会越权。
 func EntryCategoryCodes(entry string) []string {
 	if entry == EntryPractice {
-		return []string{models.QuestionBankCategoryGeneral}
+		return []string{models.QuestionBankCategoryGeneral, models.QuestionBankCategorySpecial}
 	}
 	return []string{models.QuestionBankCategoryCompetition, models.QuestionBankCategoryCertification}
 }

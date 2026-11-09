@@ -39,6 +39,7 @@ const (
 	QuestionBankCategoryCompetition   = "competition"
 	QuestionBankCategoryCertification = "certification"
 	QuestionBankCategoryGeneral       = "general"
+	QuestionBankCategorySpecial       = "special"
 
 	QuestionTypeSingleChoice   = "single_choice"
 	QuestionTypeMultipleChoice = "multiple_choice"

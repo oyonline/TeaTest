@@ -38,13 +38,13 @@
             <div class="section-icon" :class="group.code">
               <el-icon>
                 <Trophy v-if="group.code === 'competition'" />
-                <Collection v-else-if="group.code === 'general'" />
+                <Collection v-else-if="group.code === 'general' || group.code === 'special'" />
                 <Medal v-else />
               </el-icon>
             </div>
             <div>
               <h2>{{ group.name }}</h2>
-              <p>{{ group.code === 'competition' ? '竞赛专项练习' : group.code === 'general' ? '文字练习与通用知识' : '职业技能考级练习' }}</p>
+              <p>{{ group.code === 'competition' ? '竞赛专项练习' : (group.code === 'general' || group.code === 'special') ? '文字练习与通用知识' : '职业技能考级练习' }}</p>
             </div>
           </div>
 
@@ -129,7 +129,7 @@ const completedExams = ref(0)
 
 const bankGroups = computed(() => {
   const definitions = isPractice.value
-    ? [{ code: 'general', name: '通用题库' }]
+    ? [{ code: 'general', name: '通用题库' }, { code: 'special', name: '专用类' }]
     : [{ code: 'competition', name: '竞赛题库' }, { code: 'certification', name: '考级题库' }]
   return definitions.map(group => ({
     ...group,
