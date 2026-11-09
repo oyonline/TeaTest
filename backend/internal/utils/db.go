@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"tea-exam/internal/config"
 	"tea-exam/internal/models"
 )
@@ -73,4 +74,27 @@ func CreateDatabaseIfNotExists(cfg *config.DatabaseConfig) error {
 	}
 
 	return nil
+}
+
+// InitializeQuestionBankAccess 一次性把“当时已存在的全部用户 × 全部题库”写入授权表。
+// admin_config 上的持久标记保证重启不会重授已撤销权限或自动授权后来新库。
+func InitializeQuestionBankAccess(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var config models.AdminConfig
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&config).Error; err != nil {
+			return fmt.Errorf("读取管理员配置失败: %v", err)
+		}
+		if config.BankAccessInitialized {
+			return nil
+		}
+		const grantAll = `
+INSERT IGNORE INTO exam_user_question_banks (user_id, question_bank_type_id, created_at, updated_at)
+SELECT exam_users.id, question_bank_types.id, NOW(), NOW()
+FROM exam_users CROSS JOIN question_bank_types`
+		if err := tx.Exec(grantAll).Error; err != nil {
+			return fmt.Errorf("初始化题库授权失败: %v", err)
+		}
+		return tx.Model(&models.AdminConfig{}).Where("id = ?", config.ID).
+			Update("bank_access_initialized", true).Error
+	})
 }

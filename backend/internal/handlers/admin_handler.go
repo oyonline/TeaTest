@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"tea-exam/internal/models"
@@ -205,6 +207,14 @@ func (h *AdminHandler) ImportQuestions(c *gin.Context) {
 		return
 	}
 	questions, result := csvutil.ParseQuestions(records, 1)
+	if result.FailCount > 0 {
+		reasons := result.FailReasons
+		if len(reasons) > 5 {
+			reasons = reasons[:5]
+		}
+		response.BadRequest(c, fmt.Sprintf("导入失败：文件包含 %d 行非法数据，未写入任何题目。%s", result.FailCount, strings.Join(reasons, "；")))
+		return
+	}
 	if result.SuccessCount == 0 {
 		response.BadRequest(c, "没有有效题目可导入")
 		return
@@ -234,4 +244,44 @@ func (h *AdminHandler) ImportQuestions(c *gin.Context) {
 		"fail_count":    result.FailCount,
 		"fail_reasons":  result.FailReasons,
 	})
+}
+
+func (h *AdminHandler) GetUserQuestionBanks(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "答题人ID无效")
+		return
+	}
+	access, err := h.adminService.GetUserQuestionBanks(uint(id))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, access)
+}
+
+type ReplaceUserQuestionBanksRequest struct {
+	QuestionBankIDs *[]uint `json:"question_bank_ids"`
+}
+
+func (h *AdminHandler) ReplaceUserQuestionBanks(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "答题人ID无效")
+		return
+	}
+	var req ReplaceUserQuestionBanksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "可访问题库格式错误")
+		return
+	}
+	if req.QuestionBankIDs == nil {
+		response.BadRequest(c, "question_bank_ids 必须显式提供，空数组表示撤销全部")
+		return
+	}
+	if err := h.adminService.ReplaceUserQuestionBanks(uint(id), *req.QuestionBankIDs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.SuccessWithMessage(c, "可访问题库已保存", nil)
 }

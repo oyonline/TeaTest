@@ -32,15 +32,34 @@ func handleExamError(c *gin.Context, err error) {
 		response.NotFound(c, err.Error())
 	case errors.Is(err, services.ErrExamForbidden):
 		response.Forbidden(c, err.Error())
+	case errors.Is(err, services.ErrBankAccessDenied):
+		response.Forbidden(c, err.Error())
+	case errors.Is(err, services.ErrLegacyExamUnsupported):
+		response.Error(c, 400, err.Error())
+	case errors.Is(err, services.ErrInvalidEntry):
+		response.BadRequest(c, err.Error())
 	default:
 		response.Error(c, 400, err.Error())
 	}
 }
 
 // GetQuestionBanks 获取用户可选择的具体题库。
+func parseEntry(c *gin.Context) (string, bool) {
+	entry, err := services.ParseEntry(c.Query("entry"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return "", false
+	}
+	return entry, true
+}
+
 func (h *ExamHandler) GetQuestionBanks(c *gin.Context) {
+	entry, ok := parseEntry(c)
+	if !ok {
+		return
+	}
 	userID, _ := c.Get("userID")
-	banks, err := h.examService.GetQuestionBanks(userID.(uint))
+	banks, err := h.examService.GetQuestionBanksForEntry(userID.(uint), entry)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return
@@ -51,6 +70,10 @@ func (h *ExamHandler) GetQuestionBanks(c *gin.Context) {
 // GetInProgressExam 获取指定题库的进行中考试；不传题库 ID 时查询历史未分类考试。
 func (h *ExamHandler) GetInProgressExam(c *gin.Context) {
 	userID, _ := c.Get("userID")
+	entry, ok := parseEntry(c)
+	if !ok {
+		return
+	}
 	userName, _ := c.Get("userName")
 	var bankID *uint
 	if value := c.Query("question_bank_id"); value != "" {
@@ -62,9 +85,9 @@ func (h *ExamHandler) GetInProgressExam(c *gin.Context) {
 		id := uint(parsed)
 		bankID = &id
 	}
-	record, err := h.examService.GetInProgressExam(userID.(uint), bankID)
+	record, err := h.examService.GetInProgressExamForEntry(userID.(uint), bankID, entry)
 	if err != nil {
-		response.ServerError(c, err.Error())
+		handleExamError(c, err)
 		return
 	}
 	if record == nil {
@@ -89,6 +112,7 @@ func (h *ExamHandler) GetInProgressExam(c *gin.Context) {
 		}(),
 		"total_questions": total,
 		"user_name":       userName,
+		"entry":           entry,
 	})
 }
 
@@ -98,9 +122,13 @@ func (h *ExamHandler) StartExam(c *gin.Context) {
 		response.BadRequest(c, "请选择题库")
 		return
 	}
+	entry, ok := parseEntry(c)
+	if !ok {
+		return
+	}
 	userID, _ := c.Get("userID")
 	userName, _ := c.Get("userName")
-	record, err := h.examService.StartExam(userID.(uint), userName.(string), req.QuestionBankID)
+	record, err := h.examService.StartExamForEntry(userID.(uint), userName.(string), req.QuestionBankID, entry)
 	if err != nil {
 		handleExamError(c, err)
 		return
@@ -110,6 +138,7 @@ func (h *ExamHandler) StartExam(c *gin.Context) {
 		"start_time":         record.StartTime,
 		"question_bank_id":   record.QuestionBankTypeID,
 		"question_bank_name": record.QuestionBankName,
+		"entry":              entry,
 	})
 }
 
@@ -199,6 +228,7 @@ func (h *ExamHandler) SubmitAnswer(c *gin.Context) {
 	}
 	resp := gin.H{
 		"is_correct":     progress.IsCorrect,
+		"is_graded":      progress.IsGraded,
 		"user_answer":    progress.UserAnswer,
 		"correct_answer": correctAnswer,
 		"is_completed":   completed,
@@ -237,7 +267,7 @@ func (h *ExamHandler) GetExamResult(c *gin.Context) {
 		return
 	}
 	userID, _ := c.Get("userID")
-	record, err := h.examService.GetExamResult(uint(examID), userID.(uint))
+	record, err := h.examService.GetExamResultDetail(uint(examID), userID.(uint))
 	if err != nil {
 		handleExamError(c, err)
 		return
@@ -255,16 +285,24 @@ func (h *ExamHandler) GetExamResult(c *gin.Context) {
 		"end_time":               record.EndTime,
 		"duration_seconds":       record.DurationSeconds,
 		"total_score":            record.TotalScore,
+		"completed_count":        record.CompletedCount,
 		"correct_count":          record.CorrectCount,
 		"wrong_count":            record.WrongCount,
+		"graded_questions":       record.GradedQuestions,
+		"ungraded_count":         record.UngradedCount,
+		"has_graded_questions":   record.HasGradedQuestions,
 		"accuracy_rate":          record.AccuracyRate,
 		"status":                 record.Status,
 	})
 }
 
 func (h *ExamHandler) GetExamStats(c *gin.Context) {
+	entry, ok := parseEntry(c)
+	if !ok {
+		return
+	}
 	userID, _ := c.Get("userID")
-	stats, err := h.examService.GetExamStats(userID.(uint))
+	stats, err := h.examService.GetExamStatsForEntry(userID.(uint), entry)
 	if err != nil {
 		response.ServerError(c, err.Error())
 		return

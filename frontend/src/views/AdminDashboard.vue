@@ -56,8 +56,11 @@
               <template #default="{ row }"><el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '启用' : '停用' }}</el-tag></template>
             </el-table-column>
             <el-table-column label="创建时间" min-width="180"><template #default="{ row }">{{ formatDate(row.created_at) }}</template></el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }"><el-button type="primary" link :aria-label="`重置${row.name}的密码`" @click="openResetPasswordDialog(row)">重置密码</el-button></template>
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link :aria-label="`设置${row.name}的可访问题库`" @click="openBankAccessDialog(row)">可访问题库</el-button>
+                <el-button type="primary" link :aria-label="`重置${row.name}的密码`" @click="openResetPasswordDialog(row)">重置密码</el-button>
+              </template>
             </el-table-column>
           </el-table>
         </div>
@@ -144,6 +147,7 @@
           成功 {{ importResult.success_count }} 道，失败 {{ importResult.fail_count }} 道
           <ul v-if="importResult.fail_reasons?.length"><li v-for="reason in importResult.fail_reasons" :key="reason">{{ reason }}</li></ul>
         </div>
+        <el-alert v-if="importError" class="import-error" :title="importError" type="error" :closable="false" show-icon />
       </el-card>
 
       <el-card v-if="activeSection === 'questions'" class="section-card" shadow="never">
@@ -218,7 +222,13 @@
             <el-table-column prop="completed_count" label="完成" width="75" />
             <el-table-column prop="correct_count" label="正确" width="75" />
             <el-table-column prop="wrong_count" label="错误" width="75" />
-            <el-table-column label="正确率" width="95"><template #default="{ row }"><el-tag :type="accuracyType(row.accuracy_rate)" size="small">{{ Number(row.accuracy_rate || 0).toFixed(2) }}%</el-tag></template></el-table-column>
+            <el-table-column prop="ungraded_count" label="未评分" width="80" />
+            <el-table-column label="正确率" width="110">
+              <template #default="{ row }">
+                <el-tag v-if="row.has_graded_questions === false" type="info" size="small">未自动评分</el-tag>
+                <el-tag v-else :type="accuracyType(row.accuracy_rate)" size="small">{{ Number(row.accuracy_rate || 0).toFixed(2) }}%</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="状态" width="90"><template #default="{ row }"><el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">{{ row.status === 'completed' ? '已完成' : '进行中' }}</el-tag></template></el-table-column>
           </el-table>
         </div>
@@ -234,6 +244,7 @@
           <el-select v-model="bankForm.category_code" class="wide-control">
             <el-option label="竞赛题库" value="competition" />
             <el-option label="考级题库" value="certification" />
+            <el-option label="通用题库" value="general" />
           </el-select>
         </el-form-item>
         <el-form-item label="题库名称" required><el-input v-model="bankForm.name" maxlength="100" show-word-limit /></el-form-item>
@@ -268,6 +279,23 @@
         <el-button type="primary" :loading="resetPasswordSaving" @click="saveResetPassword">确认重置</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="bankAccessDialogVisible" title="可访问题库" width="min(560px, calc(100vw - 24px))" :close-on-click-modal="!bankAccessSaving" :show-close="!bankAccessSaving">
+      <p class="access-hint">{{ bankAccessForm.name }}：未勾选任何题库时，该答题人将看不到题库。新用户和新题库不会自动授权。</p>
+      <el-alert v-if="bankAccessFailed" class="access-error" title="可访问题库加载失败，请重新打开重试" type="error" :closable="false" show-icon />
+      <div v-loading="bankAccessLoading" class="bank-access-list">
+        <el-checkbox-group v-model="bankAccessForm.questionBankIds" :disabled="bankAccessSaving || bankAccessLoading || !bankAccessLoaded || bankAccessFailed">
+          <el-checkbox v-for="bank in banks" :key="bank.id" :value="bank.id">
+            {{ bank.category_name }} / {{ bank.name }}
+          </el-checkbox>
+        </el-checkbox-group>
+        <el-empty v-if="!bankAccessLoading && banks.length === 0" description="暂无题库" :image-size="72" />
+      </div>
+      <template #footer>
+        <el-button :disabled="bankAccessSaving" @click="bankAccessDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="bankAccessSaving" :disabled="bankAccessSaving || bankAccessLoading || !bankAccessLoaded || bankAccessFailed" @click="saveBankAccess">保存授权</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -298,7 +326,7 @@ const navItems = [
 
 const pageDetails = {
   banks: { title: '题库类型管理', description: '管理具体题库的分类、名称、排序和启用状态' },
-  users: { title: '答题人管理', description: '查看、新增答题账号并重置登录密码' },
+  users: { title: '答题人管理', description: '查看、新增答题账号、分配可访问题库并重置登录密码' },
   import: { title: '题库导入', description: '选择具体题库并覆盖或追加导入题目' },
   questions: { title: '题目归类', description: '查看现有题目并批量调整所属题库' },
   records: { title: '考试记录', description: '按答题人或题库查询考试结果和进行状态' }
@@ -318,6 +346,13 @@ const userForm = ref({ name: '', password: '' })
 const resetPasswordDialogVisible = ref(false)
 const resetPasswordSaving = ref(false)
 const resetPasswordForm = ref({ id: null, name: '', password: '', confirmPassword: '' })
+const bankAccessDialogVisible = ref(false)
+const bankAccessLoading = ref(false)
+const bankAccessSaving = ref(false)
+const bankAccessLoaded = ref(false)
+const bankAccessFailed = ref(false)
+const bankAccessRequestSeq = ref(0)
+const bankAccessForm = ref({ userId: null, name: '', questionBankIds: [] })
 
 const bankDialogVisible = ref(false)
 const editingBankId = ref(null)
@@ -327,6 +362,7 @@ const bankForm = ref({ category_code: 'competition', name: '', sort_order: 0, st
 const uploadRef = ref(null)
 const importLoading = ref(false)
 const importResult = ref(null)
+const importError = ref(null)
 const importForm = ref({ questionBankId: null, mode: 'replace', file: null })
 
 const questions = ref([])
@@ -347,7 +383,7 @@ const recordTotal = ref(0)
 const recordBankFilter = ref('')
 const searchKeyword = ref('')
 
-const categoryName = code => code === 'competition' ? '竞赛题库' : code === 'certification' ? '考级题库' : '历史未分类'
+const categoryName = code => code === 'competition' ? '竞赛题库' : code === 'certification' ? '考级题库' : code === 'general' ? '通用题库' : '历史未分类'
 
 const loadUsers = async () => {
   usersLoading.value = true
@@ -415,6 +451,54 @@ const saveResetPassword = async () => {
   } finally { resetPasswordSaving.value = false }
 }
 
+const openBankAccessDialog = async (user) => {
+  const seq = ++bankAccessRequestSeq.value
+  const userId = user.id
+  bankAccessForm.value = { userId, name: user.name, questionBankIds: [] }
+  bankAccessDialogVisible.value = true
+  bankAccessLoading.value = true
+  bankAccessLoaded.value = false
+  bankAccessFailed.value = false
+  try {
+    // 题库列表与当前用户授权必须同时成功，避免只拿到旧列表就允许保存空数组。
+    const [bankList, res] = await Promise.all([
+      adminApi.getQuestionBanks(),
+      adminApi.getUserQuestionBanks(userId)
+    ])
+    if (seq !== bankAccessRequestSeq.value || !bankAccessDialogVisible.value || bankAccessForm.value.userId !== userId) return
+    banks.value = bankList || []
+    bankAccessForm.value.questionBankIds = res.question_bank_ids || []
+    bankAccessLoaded.value = true
+  } catch (error) {
+    if (seq === bankAccessRequestSeq.value && bankAccessForm.value.userId === userId) {
+      bankAccessFailed.value = true
+      bankAccessLoaded.value = false
+    }
+    console.error('加载可访问题库失败:', error)
+  } finally {
+    if (seq === bankAccessRequestSeq.value && bankAccessForm.value.userId === userId) {
+      bankAccessLoading.value = false
+    }
+  }
+}
+
+const saveBankAccess = async () => {
+  if (bankAccessSaving.value || !bankAccessForm.value.userId || !bankAccessLoaded.value ||
+      bankAccessLoading.value || bankAccessFailed.value || !bankAccessDialogVisible.value) return
+  bankAccessSaving.value = true
+  try {
+    await adminApi.replaceUserQuestionBanks(bankAccessForm.value.userId, {
+      question_bank_ids: bankAccessForm.value.questionBankIds
+    })
+    ElMessage.success('可访问题库已保存')
+    bankAccessDialogVisible.value = false
+  } catch (error) {
+    console.error('保存可访问题库失败:', error)
+  } finally {
+    bankAccessSaving.value = false
+  }
+}
+
 const loadStats = async () => {
   try { stats.value = await adminApi.getBankStats() } catch (error) { console.error('加载统计失败:', error) }
 }
@@ -469,8 +553,8 @@ const handleBankStatusChange = async (bank) => {
   }
 }
 
-const handleFileChange = file => { importForm.value.file = file.raw; importResult.value = null }
-const handleFileRemove = () => { importForm.value.file = null; importResult.value = null }
+const handleFileChange = file => { importForm.value.file = file.raw; importResult.value = null; importError.value = null }
+const handleFileRemove = () => { importForm.value.file = null; importResult.value = null; importError.value = null }
 
 const handleImport = async () => {
   if (!importForm.value.questionBankId || !importForm.value.file) {
@@ -485,6 +569,7 @@ const handleImport = async () => {
     await ElMessageBox.confirm(message, '确认导入', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' })
   } catch { return }
   importLoading.value = true
+  importError.value = null
   try {
     importResult.value = await adminApi.importQuestions({
       file: importForm.value.file,
@@ -496,6 +581,9 @@ const handleImport = async () => {
     importForm.value.file = null
     await loadBanks()
   } catch (error) {
+    // 后端任一非法行会整批拒绝，不会 replace 旧题库。
+    importResult.value = null
+    importError.value = error?.message || '导入失败，题库未发生变化'
     console.error('导入失败:', error)
   } finally { importLoading.value = false }
 }
@@ -648,4 +736,29 @@ watch(activeSection, section => loadActivePage(section))
   .pagination-wrapper :deep(.el-pagination__total), .pagination-wrapper :deep(.el-pagination__sizes) { display: none; }
   .pagination-wrapper :deep(.el-pagination) { --el-pagination-button-width: 28px; --el-pagination-button-height: 32px; }
 }
+
+.access-error {
+  margin-bottom: 12px;
+}
+
+.access-hint {
+  margin: 0 0 16px;
+  color: #909399;
+  line-height: 1.6;
+}
+
+.bank-access-list {
+  min-height: 72px;
+}
+
+.bank-access-list :deep(.el-checkbox-group) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-error {
+  margin-top: 16px;
+}
+
 </style>

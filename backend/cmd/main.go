@@ -74,7 +74,7 @@ func main() {
 
 	// 需要用户认证的路由
 	userGroup := api.Group("/")
-	userGroup.Use(middleware.JWTAuth(cfg.JWT.Secret))
+	userGroup.Use(middleware.JWTAuth(cfg.JWT.Secret), middleware.UserOnly())
 	{
 		// 用户信息
 		userGroup.GET("/auth/me", authHandler.GetCurrentUser)
@@ -100,6 +100,8 @@ func main() {
 		adminGroup.GET("/users", adminHandler.ListExamUsers)
 		adminGroup.POST("/users", adminHandler.CreateExamUser)
 		adminGroup.POST("/users/:id/reset-password", adminHandler.ResetExamUserPassword)
+		adminGroup.GET("/users/:id/question-banks", adminHandler.GetUserQuestionBanks)
+		adminGroup.PUT("/users/:id/question-banks", adminHandler.ReplaceUserQuestionBanks)
 
 		// 题库统计
 		adminGroup.GET("/stats", adminHandler.GetBankStats)

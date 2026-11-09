@@ -5,7 +5,7 @@
       <div class="header-content">
         <div class="brand">
           <el-icon :size="24" color="#409eff"><Collection /></el-icon>
-          <span class="brand-text">{{ result.question_bank_name || '茶叶理论题库' }}</span>
+          <span class="brand-text">{{ result.question_bank_name || (isPractice ? '通用题库文字练习' : '茶叶理论题库') }}</span>
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
@@ -25,23 +25,31 @@
           <div class="success-icon">
             <el-icon :size="64" color="#67c23a"><CircleCheckFilled /></el-icon>
           </div>
-          <h1 class="result-title">考试完成</h1>
+          <h1 class="result-title">{{ isPractice ? '练习完成' : '考试完成' }}</h1>
           <p class="result-subtitle">
             {{ result.question_bank_category }} / {{ result.question_bank_name }}
           </p>
         </div>
 
-        <!-- 成绩展示 -->
-        <div class="score-section">
+        <!-- 成绩展示：全简答时没有自动评分口径，不显示 0 分/0%。 -->
+        <div v-if="hasGradedQuestions" class="score-section">
           <div class="score-circle">
             <div class="score-value">{{ result.total_score }}</div>
-            <div class="score-total">/ {{ totalScore }}</div>
+            <div class="score-total">/ {{ result.graded_questions }}</div>
           </div>
           <div class="accuracy-rate">
-            <span class="rate-label">正确率</span>
-            <span class="rate-value">{{ result.accuracy_rate?.toFixed(2) }}%</span>
+            <span class="rate-label">自动评分正确率</span>
+            <span class="rate-value">{{ Number(result.accuracy_rate || 0).toFixed(2) }}%</span>
           </div>
         </div>
+        <el-alert
+          v-else
+          class="no-grade-alert"
+          title="本场全部为简答题，已作答内容仅供对照参考答案，不自动评分。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
 
         <!-- 详细统计 -->
         <div class="stats-grid">
@@ -62,6 +70,16 @@
             <div class="stat-content">
               <div class="stat-value">{{ result.wrong_count }}</div>
               <div class="stat-label">错误数量</div>
+            </div>
+          </div>
+
+          <div class="stat-item ungraded">
+            <div class="stat-icon">
+              <el-icon><EditPen /></el-icon>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{{ result.ungraded_count || 0 }}</div>
+              <div class="stat-label">已答（未自动评分）</div>
             </div>
           </div>
 
@@ -109,17 +127,20 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Collection, User, SwitchButton, CircleCheckFilled,
-  CircleCheck, CircleClose, Timer, Calendar, HomeFilled
+  CircleCheck, CircleClose, Timer, Calendar, HomeFilled, EditPen
 } from '@element-plus/icons-vue'
 import { examApi } from '../api'
 import { useUserStore } from '../stores/user'
+import { entryFromRoute, entryHome, entryLogin, isPracticeEntry } from '../utils/entry'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const entry = computed(() => entryFromRoute(route))
+const isPractice = computed(() => isPracticeEntry(entry.value))
 
 const result = ref({})
-const totalScore = ref(500)
+const hasGradedQuestions = computed(() => result.value.has_graded_questions === true && Number(result.value.graded_questions || 0) > 0)
 
 // 格式化时长
 const formattedDuration = computed(() => {
@@ -155,14 +176,13 @@ const loadResult = async () => {
   const examId = route.params.examId
   if (!examId) {
     ElMessage.error('考试ID无效')
-    router.push('/welcome')
+    router.push(entryHome(entry.value))
     return
   }
 
   try {
     const res = await examApi.getExamResult(examId)
     result.value = res
-    totalScore.value = res.total_score + res.wrong_count
   } catch (error) {
     console.error('获取考试结果失败:', error)
   }
@@ -170,14 +190,14 @@ const loadResult = async () => {
 
 // 返回首页
 const backToWelcome = () => {
-  router.push('/welcome')
+  router.push(entryHome(entry.value))
 }
 
 // 退出登录
 const handleLogout = () => {
   userStore.logout()
   ElMessage.success('已退出登录')
-  router.push('/')
+  router.push(entryLogin(entry.value))
 }
 
 onMounted(() => {
@@ -353,9 +373,18 @@ onMounted(() => {
   color: #2196f3;
 }
 
+.stat-item.ungraded .stat-icon {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
 .stat-item.date .stat-icon {
   background: #f3e5f5;
   color: #9c27b0;
+}
+
+.no-grade-alert {
+  margin-bottom: 32px;
 }
 
 .stat-content {

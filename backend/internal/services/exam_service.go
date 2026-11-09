@@ -48,6 +48,8 @@ func QuestionBankCategoryName(code string) string {
 		return "竞赛题库"
 	case models.QuestionBankCategoryCertification:
 		return "考级题库"
+	case models.QuestionBankCategoryGeneral:
+		return "通用题库"
 	default:
 		return "历史未分类"
 	}
@@ -56,7 +58,6 @@ func QuestionBankCategoryName(code string) string {
 func questionScope(db *gorm.DB, record *models.ExamRecord) *gorm.DB {
 	query := db.Model(&models.QuestionBank{}).Where("question_text IS NOT NULL AND question_text != ?", "")
 	if record.QuestionBankTypeID == nil {
-		// 升级前创建的进行中考试继续跟随全部题目，避免管理员归类后无法续答。
 		return query
 	}
 	return query.Where("question_bank_type_id = ?", *record.QuestionBankTypeID)
@@ -68,10 +69,24 @@ func (s *ExamService) getCurrentQuestionIDs(db *gorm.DB, record *models.ExamReco
 	return ids, err
 }
 
-// GetQuestionBanks 获取用户可见题库；已停用但有进行中考试的题库仍返回，供用户继续答题。
+// GetQuestionBanks 旧茶入口的授权题库列表（保留旧调用方兼容）。
 func (s *ExamService) GetQuestionBanks(userID uint) ([]QuestionBankOption, error) {
+	return s.GetQuestionBanksForEntry(userID, EntryTea)
+}
+
+// GetQuestionBanksForEntry 返回“数据库授权 ∩ 入口分类”的题库。
+func (s *ExamService) GetQuestionBanksForEntry(userID uint, entry string) ([]QuestionBankOption, error) {
+	if entry != EntryTea && entry != EntryPractice {
+		return nil, ErrInvalidEntry
+	}
+	categories := EntryCategoryCodes(entry)
 	var banks []models.QuestionBankType
-	if err := s.db.Order("CASE category_code WHEN 'competition' THEN 0 ELSE 1 END, sort_order ASC, id ASC").Find(&banks).Error; err != nil {
+	if err := s.db.Model(&models.QuestionBankType{}).
+		Select("question_bank_types.*").
+		Joins("JOIN exam_user_question_banks ON exam_user_question_banks.question_bank_type_id = question_bank_types.id").
+		Where("exam_user_question_banks.user_id = ? AND question_bank_types.category_code IN ?", userID, categories).
+		Order("CASE question_bank_types.category_code WHEN 'competition' THEN 0 WHEN 'certification' THEN 1 WHEN 'general' THEN 2 ELSE 3 END, question_bank_types.sort_order ASC, question_bank_types.id ASC").
+		Find(&banks).Error; err != nil {
 		return nil, err
 	}
 
@@ -120,16 +135,33 @@ func (s *ExamService) GetQuestionBanks(userID uint) ([]QuestionBankOption, error
 	return result, nil
 }
 
-// GetInProgressExam 获取用户在指定题库中的进行中考试。bankID 为 nil 时查询历史未分类考试。
+// GetInProgressExam 获取用户在指定题库中的进行中考试。
+// 历史未分类（题库 ID 为 NULL）不再允许进入，只返回明确提示。
 func (s *ExamService) GetInProgressExam(userID uint, bankID *uint) (*models.ExamRecord, error) {
-	var record models.ExamRecord
-	query := s.db.Where("user_id = ? AND status = 'in_progress'", userID)
 	if bankID == nil {
-		query = query.Where("question_bank_type_id IS NULL")
-	} else {
-		query = query.Where("question_bank_type_id = ?", *bankID)
+		var legacy models.ExamRecord
+		err := s.db.Where("user_id = ? AND status = 'in_progress' AND question_bank_type_id IS NULL", userID).
+			Order("created_at ASC").First(&legacy).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrLegacyExamUnsupported
 	}
-	err := query.Order("created_at ASC").First(&record).Error
+
+	allowed, err := s.userHasBankAccess(s.db, userID, *bankID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrBankAccessDenied
+	}
+
+	var record models.ExamRecord
+	err = s.db.Where("user_id = ? AND status = 'in_progress' AND question_bank_type_id = ?", userID, *bankID).
+		Order("created_at ASC").First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -139,10 +171,38 @@ func (s *ExamService) GetInProgressExam(userID uint, bankID *uint) (*models.Exam
 	return &record, nil
 }
 
-// StartExam 开始指定题库考试。同一用户每个题库最多一场进行中考试。
+// GetInProgressExamForEntry 在授权之外再校验入口分类，防止通过 in-progress 接口串入口。
+func (s *ExamService) GetInProgressExamForEntry(userID uint, bankID *uint, entry string) (*models.ExamRecord, error) {
+	if entry != EntryTea && entry != EntryPractice {
+		return nil, ErrInvalidEntry
+	}
+	if bankID != nil {
+		var bank models.QuestionBankType
+		if err := s.db.First(&bank, *bankID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrBankAccessDenied
+			}
+			return nil, err
+		}
+		if !EntryAllowsCategory(entry, bank.CategoryCode) {
+			return nil, errors.New("该题库不属于当前入口")
+		}
+	}
+	return s.GetInProgressExam(userID, bankID)
+}
+
+// StartExam 旧入口开始考试，保留旧调用方兼容。
 func (s *ExamService) StartExam(userID uint, userName string, bankID uint) (*models.ExamRecord, error) {
+	return s.StartExamForEntry(userID, userName, bankID, EntryTea)
+}
+
+// StartExamForEntry 开始指定题库考试。授权与入口分类都在写入前校验。
+func (s *ExamService) StartExamForEntry(userID uint, userName string, bankID uint, entry string) (*models.ExamRecord, error) {
 	if bankID == 0 {
 		return nil, errors.New("请选择题库")
+	}
+	if entry != EntryTea && entry != EntryPractice {
+		return nil, ErrInvalidEntry
 	}
 
 	var result *models.ExamRecord
@@ -159,12 +219,22 @@ func (s *ExamService) StartExam(userID uint, userName string, bankID uint) (*mod
 			}
 			return err
 		}
+		allowed, err := s.userHasBankAccess(tx, userID, bankID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrBankAccessDenied
+		}
+		if !EntryAllowsCategory(entry, bank.CategoryCode) {
+			return errors.New("该题库不属于当前入口")
+		}
 		if bank.Status != 1 {
 			return errors.New("所选题库已停用，暂时不能开始新考试")
 		}
 
 		var existing models.ExamRecord
-		err := tx.Where("user_id = ? AND question_bank_type_id = ? AND status = 'in_progress'", userID, bankID).First(&existing).Error
+		err = tx.Where("user_id = ? AND question_bank_type_id = ? AND status = 'in_progress'", userID, bankID).First(&existing).Error
 		if err == nil {
 			result = &existing
 			return nil
@@ -212,6 +282,16 @@ func (s *ExamService) getExamForUser(examRecordID, userID uint) (*models.ExamRec
 	if record.UserID != userID {
 		return nil, ErrExamForbidden
 	}
+	if record.QuestionBankTypeID == nil {
+		return nil, ErrLegacyExamUnsupported
+	}
+	allowed, err := s.userHasBankAccess(s.db, userID, *record.QuestionBankTypeID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrBankAccessDenied
+	}
 	return &record, nil
 }
 
@@ -228,7 +308,7 @@ func (s *ExamService) GetExamInfo(examRecordID, userID uint) (*models.ExamRecord
 	return record, total, nil
 }
 
-// normalizeAnswer 将答案标准化为排序后的大写字母字符串。
+// normalizeAnswer 将客观题答案标准化为排序后的大写字母字符串。
 func normalizeAnswer(answer string) string {
 	letters := make([]string, 0, len(answer))
 	for _, ch := range strings.ToUpper(answer) {
@@ -262,8 +342,31 @@ func countAnsweredQuestions(db *gorm.DB, examRecordID uint, questionIDs []uint, 
 	return count, err
 }
 
-// finalizeExamIfComplete 按题库当前内容结算考试。题库被管理员清空时也会正常结束，
-// 避免动态题库变化后留下无法继续作答的进行中记录。
+func countUngradedQuestions(db *gorm.DB, examRecordID uint, questionIDs []uint) (int64, error) {
+	if len(questionIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := db.Model(&models.ExamProgress{}).
+		Where("exam_record_id = ? AND question_id IN ? AND is_locked = ? AND is_graded = ?", examRecordID, questionIDs, true, false).
+		Count(&count).Error
+	return count, err
+}
+
+func (s *ExamService) gradedQuestionIDs(db *gorm.DB, record *models.ExamRecord) ([]uint, error) {
+	var ids []uint
+	err := questionScope(db, record).
+		Where("question_type_code IN ?", []string{
+			models.QuestionTypeSingleChoice,
+			models.QuestionTypeMultipleChoice,
+			models.QuestionTypeTrueFalse,
+			models.QuestionTypeFillBlank,
+		}).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+// finalizeExamIfComplete 按题库当前内容结算考试。简答题只计已答，不计对错与自动得分。
 func finalizeExamIfComplete(db *gorm.DB, record *models.ExamRecord, questionIDs []uint) (bool, error) {
 	completedCount, err := countAnsweredQuestions(db, record.ID, questionIDs, false)
 	if err != nil {
@@ -273,13 +376,38 @@ func finalizeExamIfComplete(db *gorm.DB, record *models.ExamRecord, questionIDs 
 		return false, nil
 	}
 
-	correctCount, err := countAnsweredQuestions(db, record.ID, questionIDs, true)
+	var gradedIDs []uint
+	if len(questionIDs) > 0 {
+		if err := db.Model(&models.QuestionBank{}).
+			Where("id IN ? AND (question_type_code IN ? OR question_type_code = ? OR question_type_code IS NULL)", questionIDs, []string{
+				models.QuestionTypeSingleChoice,
+				models.QuestionTypeMultipleChoice,
+				models.QuestionTypeTrueFalse,
+				models.QuestionTypeFillBlank,
+			}, "").
+			Pluck("id", &gradedIDs).Error; err != nil {
+			return false, err
+		}
+	}
+	gradedAnswered, err := countAnsweredQuestions(db, record.ID, gradedIDs, false)
 	if err != nil {
 		return false, err
 	}
+	correctCount, err := countAnsweredQuestions(db, record.ID, gradedIDs, true)
+	if err != nil {
+		return false, err
+	}
+	wrongCount := gradedAnswered - correctCount
+	ungradedCount := completedCount - gradedAnswered
+	if wrongCount < 0 {
+		wrongCount = 0
+	}
+	if ungradedCount < 0 {
+		ungradedCount = 0
+	}
 	accuracyRate := float64(0)
-	if len(questionIDs) > 0 {
-		accuracyRate = math.Round((float64(correctCount)/float64(len(questionIDs))*100)*100) / 100
+	if len(gradedIDs) > 0 {
+		accuracyRate = math.Round((float64(correctCount)/float64(len(gradedIDs))*100)*100) / 100
 	}
 	endTime := time.Now()
 	updates := map[string]interface{}{
@@ -287,7 +415,7 @@ func finalizeExamIfComplete(db *gorm.DB, record *models.ExamRecord, questionIDs 
 		"duration_seconds": int(endTime.Sub(record.StartTime).Seconds()),
 		"completed_count":  int(completedCount),
 		"correct_count":    int(correctCount),
-		"wrong_count":      int(completedCount - correctCount),
+		"wrong_count":      int(wrongCount),
 		"total_score":      int(correctCount),
 		"accuracy_rate":    accuracyRate,
 		"status":           "completed",
@@ -301,13 +429,8 @@ func finalizeExamIfComplete(db *gorm.DB, record *models.ExamRecord, questionIDs 
 	return true, nil
 }
 
-// SubmitAnswer 提交答案，并在当前题库全部答完时结算。
+// SubmitAnswer 提交答案；文字题保存原文，简答题不自动评分。未授权或历史 NULL 考试不会写入任何进度。
 func (s *ExamService) SubmitAnswer(examRecordID, userID, questionID uint, userAnswer string) (*models.ExamProgress, *models.ExamRecord, bool, string, error) {
-	normalizedUserAnswer := normalizeAnswer(userAnswer)
-	if normalizedUserAnswer == "" {
-		return nil, nil, false, "", errors.New("答案格式无效")
-	}
-
 	var progress models.ExamProgress
 	var record models.ExamRecord
 	var correctAnswer string
@@ -322,6 +445,16 @@ func (s *ExamService) SubmitAnswer(examRecordID, userID, questionID uint, userAn
 		if record.UserID != userID {
 			return ErrExamForbidden
 		}
+		if record.QuestionBankTypeID == nil {
+			return ErrLegacyExamUnsupported
+		}
+		allowed, err := s.userHasBankAccess(tx, userID, *record.QuestionBankTypeID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrBankAccessDenied
+		}
 		if record.Status != "in_progress" {
 			return errors.New("考试已完成，不能继续答题")
 		}
@@ -330,10 +463,29 @@ func (s *ExamService) SubmitAnswer(examRecordID, userID, questionID uint, userAn
 		if err := questionScope(tx, &record).Where("id = ?", questionID).First(&question).Error; err != nil {
 			return errors.New("题目不属于本次考试")
 		}
-		correctAnswer = normalizeAnswer(question.CorrectAnswer)
+
+		var submitted string
+		var isCorrect, isGraded bool
+		if IsTextQuestionType(question.QuestionTypeCode) {
+			submitted, err = ValidateTextAnswer(userAnswer)
+			if err != nil {
+				return err
+			}
+			isGraded = question.QuestionTypeCode != models.QuestionTypeShortAnswer
+			isCorrect = isGraded && submitted == NormalizeTextAnswer(question.CorrectAnswer)
+			correctAnswer = question.CorrectAnswer
+		} else {
+			submitted = normalizeAnswer(userAnswer)
+			if submitted == "" {
+				return errors.New("答案格式无效")
+			}
+			isGraded = true
+			correctAnswer = normalizeAnswer(question.CorrectAnswer)
+			isCorrect = submitted == correctAnswer
+		}
 
 		var existing models.ExamProgress
-		err := tx.Where("exam_record_id = ? AND question_id = ?", examRecordID, questionID).First(&existing).Error
+		err = tx.Where("exam_record_id = ? AND question_id = ?", examRecordID, questionID).First(&existing).Error
 		if err == nil && existing.IsLocked {
 			return errors.New("该题已锁定，无法修改答案")
 		}
@@ -345,18 +497,30 @@ func (s *ExamService) SubmitAnswer(examRecordID, userID, questionID uint, userAn
 		progress = models.ExamProgress{
 			ExamRecordID: examRecordID,
 			QuestionID:   questionID,
-			UserAnswer:   normalizedUserAnswer,
-			IsCorrect:    normalizedUserAnswer == correctAnswer,
+			UserAnswer:   submitted,
+			IsCorrect:    isCorrect,
+			IsGraded:     isGraded,
 			IsLocked:     true,
 			AnsweredAt:   &now,
 		}
 		if existing.ID > 0 {
 			progress.ID = existing.ID
-			if err := tx.Model(&existing).Updates(&progress).Error; err != nil {
+			if err := tx.Model(&existing).Updates(map[string]interface{}{
+				"user_answer": submitted,
+				"is_correct":  isCorrect,
+				"is_graded":   isGraded,
+				"is_locked":   true,
+				"answered_at": now,
+			}).Error; err != nil {
 				return err
 			}
 		} else if err := tx.Create(&progress).Error; err != nil {
 			return err
+		} else if !isGraded {
+			// GORM 的 default:true 会把零值改回 true；简答题创建后显式落为未评分。
+			if err := tx.Model(&progress).Update("is_graded", false).Error; err != nil {
+				return err
+			}
 		}
 
 		questionIDs, err := s.getCurrentQuestionIDs(tx, &record)
@@ -408,48 +572,137 @@ func (s *ExamService) GetExamResult(examRecordID, userID uint) (*models.ExamReco
 	return s.getExamForUser(examRecordID, userID)
 }
 
-// GetExamStats 获取用户总体统计。
-func (s *ExamService) GetExamStats(userID uint) (map[string]interface{}, error) {
-	var totalQuestions int64
-	if err := s.db.Model(&models.QuestionBank{}).
-		Joins("JOIN question_bank_types ON question_bank_types.id = question_bank.question_bank_type_id AND question_bank_types.status = 1").
-		Where("question_bank.question_text IS NOT NULL AND question_bank.question_text != ?", "").Count(&totalQuestions).Error; err != nil {
-		return nil, err
+func populateExamSummary(db *gorm.DB, record *models.ExamRecord) {
+	record.GradedQuestions = 0
+	record.HasGradedQuestions = false
+	if record.QuestionBankTypeID == nil {
+		// 历史未分类记录只存档、不再提供续答；按其已存计数表达历史客观题已评分，
+		// 不查询全题库，也不改写原 completed_count/correct_count/wrong_count/正确率。
+		graded := record.CorrectCount + record.WrongCount
+		if graded > record.CompletedCount {
+			graded = record.CompletedCount
+		}
+		record.GradedQuestions = graded
+		record.HasGradedQuestions = graded > 0
+		ungraded := record.CompletedCount - graded
+		if ungraded < 0 {
+			ungraded = 0
+		}
+		record.UngradedCount = ungraded
+		return
 	}
-	var completedExams int64
-	if err := s.db.Model(&models.ExamRecord{}).Where("user_id = ? AND status = 'completed'", userID).Count(&completedExams).Error; err != nil {
-		return nil, err
+	var graded int64
+	db.Model(&models.QuestionBank{}).
+		Where("question_bank_type_id = ? AND (question_type_code IN ? OR question_type_code = ? OR question_type_code IS NULL)", *record.QuestionBankTypeID, []string{
+			models.QuestionTypeSingleChoice,
+			models.QuestionTypeMultipleChoice,
+			models.QuestionTypeTrueFalse,
+			models.QuestionTypeFillBlank,
+		}, "").Count(&graded)
+	record.GradedQuestions = int(graded)
+	record.HasGradedQuestions = graded > 0
+	ungraded := record.CompletedCount - record.CorrectCount - record.WrongCount
+	if ungraded < 0 {
+		ungraded = 0
 	}
-	var inProgressCount int64
-	if err := s.db.Model(&models.ExamRecord{}).Where("user_id = ? AND status = 'in_progress'", userID).Count(&inProgressCount).Error; err != nil {
-		return nil, err
-	}
-	stats := map[string]interface{}{
-		"total_questions":   totalQuestions,
-		"completed_exams":   completedExams,
-		"in_progress_count": inProgressCount,
-		"has_in_progress":   inProgressCount > 0,
-	}
-	legacy, err := s.GetInProgressExam(userID, nil)
+	record.UngradedCount = ungraded
+}
+
+// GetExamResultDetail 返回带 graded_questions / ungraded_count 口径的结果。
+// 已完成考试保留原成绩，不重算历史客观题分数。
+func (s *ExamService) GetExamResultDetail(examRecordID, userID uint) (*models.ExamRecord, error) {
+	record, err := s.getExamForUser(examRecordID, userID)
 	if err != nil {
 		return nil, err
 	}
-	if legacy != nil {
-		ids, err := s.getCurrentQuestionIDs(s.db, legacy)
-		if err != nil {
-			return nil, err
-		}
-		answeredCount, err := countAnsweredQuestions(s.db, legacy.ID, ids, false)
-		if err != nil {
-			return nil, err
-		}
-		stats["legacy_in_progress"] = map[string]interface{}{
-			"exam_id":         legacy.ID,
-			"answered_count":  answeredCount,
-			"total_questions": len(ids),
-			"start_time":      legacy.StartTime,
-		}
+	populateExamSummary(s.db, record)
+	if record.Status == "completed" {
+		return record, nil
 	}
+	ids, err := s.getCurrentQuestionIDs(s.db, record)
+	if err != nil {
+		return nil, err
+	}
+	completedCount, err := countAnsweredQuestions(s.db, record.ID, ids, false)
+	if err != nil {
+		return nil, err
+	}
+	correctCount, err := countAnsweredQuestions(s.db, record.ID, ids, true)
+	if err != nil {
+		return nil, err
+	}
+	ungradedCount, err := countUngradedQuestions(s.db, record.ID, ids)
+	if err != nil {
+		return nil, err
+	}
+	wrongCount := completedCount - correctCount - ungradedCount
+	if wrongCount < 0 {
+		wrongCount = 0
+	}
+	record.CompletedCount = int(completedCount)
+	record.CorrectCount = int(correctCount)
+	record.WrongCount = int(wrongCount)
+	record.UngradedCount = int(ungradedCount)
+	record.TotalScore = int(correctCount)
+	record.AccuracyRate = 0
+	if record.GradedQuestions > 0 {
+		record.AccuracyRate = math.Round((float64(correctCount)/float64(record.GradedQuestions)*100)*100) / 100
+	}
+	return record, nil
+}
+
+// GetExamStats 旧入口统计，保留旧调用方兼容。
+func (s *ExamService) GetExamStats(userID uint) (map[string]interface{}, error) {
+	return s.GetExamStatsForEntry(userID, EntryTea)
+}
+
+// GetExamStatsForEntry 统计只覆盖“授权 ∩ 入口分类”，历史 NULL 考试不纳入。
+func (s *ExamService) GetExamStatsForEntry(userID uint, entry string) (map[string]interface{}, error) {
+	if entry != EntryTea && entry != EntryPractice {
+		return nil, ErrInvalidEntry
+	}
+	categories := EntryCategoryCodes(entry)
+	var bankIDs []uint
+	if err := s.db.Model(&models.QuestionBankType{}).
+		Joins("JOIN exam_user_question_banks ON exam_user_question_banks.question_bank_type_id = question_bank_types.id").
+		Where("exam_user_question_banks.user_id = ? AND question_bank_types.category_code IN ?", userID, categories).
+		Pluck("question_bank_types.id", &bankIDs).Error; err != nil {
+		return nil, err
+	}
+
+	stats := map[string]interface{}{
+		"total_questions":   0,
+		"completed_exams":   0,
+		"in_progress_count": 0,
+		"has_in_progress":   false,
+		"entry":             entry,
+	}
+	if len(bankIDs) == 0 {
+		return stats, nil
+	}
+
+	var totalQuestions int64
+	if err := s.db.Model(&models.QuestionBank{}).
+		Where("question_bank_type_id IN ? AND question_text IS NOT NULL AND question_text != ?", bankIDs, "").
+		Count(&totalQuestions).Error; err != nil {
+		return nil, err
+	}
+	var completedExams int64
+	if err := s.db.Model(&models.ExamRecord{}).
+		Where("user_id = ? AND status = 'completed' AND question_bank_type_id IN ?", userID, bankIDs).
+		Count(&completedExams).Error; err != nil {
+		return nil, err
+	}
+	var inProgressCount int64
+	if err := s.db.Model(&models.ExamRecord{}).
+		Where("user_id = ? AND status = 'in_progress' AND question_bank_type_id IN ?", userID, bankIDs).
+		Count(&inProgressCount).Error; err != nil {
+		return nil, err
+	}
+	stats["total_questions"] = totalQuestions
+	stats["completed_exams"] = completedExams
+	stats["in_progress_count"] = inProgressCount
+	stats["has_in_progress"] = inProgressCount > 0
 	return stats, nil
 }
 
@@ -465,7 +718,7 @@ func (s *ExamService) getProgressMap(examRecordID uint) (map[uint]*models.ExamPr
 	return result, nil
 }
 
-// GetQuestionsWithProgress 获取当前题库及本次考试进度。
+// GetQuestionsWithProgress 获取当前题库及进度。未锁定的题绝不返回标准/参考答案。
 func (s *ExamService) GetQuestionsWithProgress(page, pageSize int, examRecordID, userID uint) (map[string]interface{}, error) {
 	record, err := s.getExamForUser(examRecordID, userID)
 	if err != nil {
@@ -487,32 +740,38 @@ func (s *ExamService) GetQuestionsWithProgress(page, pageSize int, examRecordID,
 
 	questionList := make([]map[string]interface{}, 0, len(questions))
 	for i, q := range questions {
-		questionType := "single_choice"
-		if q.QuestionTypeCode == "multiple_choice" || q.QuestionTypeCode == "true_false" {
-			questionType = q.QuestionTypeCode
+		questionType := q.QuestionTypeCode
+		if questionType == "" {
+			questionType = models.QuestionTypeSingleChoice
 		}
 		qData := map[string]interface{}{
-			"id":             q.ID,
-			"position":       (page-1)*pageSize + i + 1,
-			"question_no":    q.QuestionNo,
-			"question_type":  questionType,
-			"question_text":  q.QuestionText,
-			"option_a":       q.OptionA,
-			"option_b":       q.OptionB,
-			"option_c":       q.OptionC,
-			"option_d":       q.OptionD,
-			"option_e":       q.OptionE,
-			"correct_answer": "",
-			"has_answered":   false,
-			"user_answer":    "",
-			"is_correct":     false,
-			"is_locked":      false,
+			"id":                 q.ID,
+			"position":           (page-1)*pageSize + i + 1,
+			"question_no":        q.QuestionNo,
+			"question_type":      questionType,
+			"question_type_name": QuestionTypeName(questionType),
+			"question_text":      q.QuestionText,
+			"option_a":           q.OptionA,
+			"option_b":           q.OptionB,
+			"option_c":           q.OptionC,
+			"option_d":           q.OptionD,
+			"option_e":           q.OptionE,
+			"has_answered":       false,
+			"user_answer":        "",
+			"is_correct":         false,
+			"is_graded":          false,
+			"is_locked":          false,
 		}
 		if progress, ok := progressMap[q.ID]; ok {
-			qData["correct_answer"] = normalizeAnswer(q.CorrectAnswer)
+			if IsTextQuestionType(questionType) {
+				qData["correct_answer"] = q.CorrectAnswer
+			} else {
+				qData["correct_answer"] = normalizeAnswer(q.CorrectAnswer)
+			}
 			qData["has_answered"] = true
 			qData["user_answer"] = progress.UserAnswer
 			qData["is_correct"] = progress.IsCorrect
+			qData["is_graded"] = progress.IsGraded
 			qData["is_locked"] = progress.IsLocked
 		}
 		questionList = append(questionList, qData)
@@ -527,7 +786,7 @@ func (s *ExamService) GetQuestionsWithProgress(page, pageSize int, examRecordID,
 	}, nil
 }
 
-// GetAllQuestionNosWithStatus 获取当前题库全部题号及答题状态。
+// GetAllQuestionNosWithStatus 获取全部题号及状态；简答题锁定后显示 ungraded。
 func (s *ExamService) GetAllQuestionNosWithStatus(examRecordID, userID uint) ([]map[string]interface{}, error) {
 	record, err := s.getExamForUser(examRecordID, userID)
 	if err != nil {
@@ -546,7 +805,9 @@ func (s *ExamService) GetAllQuestionNosWithStatus(examRecordID, userID uint) ([]
 	for i, q := range questions {
 		status := "unanswered"
 		if progress, ok := progressMap[q.ID]; ok {
-			if progress.IsCorrect {
+			if !progress.IsGraded || q.QuestionTypeCode == models.QuestionTypeShortAnswer {
+				status = "ungraded"
+			} else if progress.IsCorrect {
 				status = "correct"
 			} else {
 				status = "wrong"

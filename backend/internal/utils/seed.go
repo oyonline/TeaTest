@@ -27,6 +27,11 @@ func SeedData(db *gorm.DB, adminInitialPassword string, seedDemoUsers bool) erro
 		return err
 	}
 
+	// 必须在种子用户/题库之后执行；只执行一次，后续新用户/新题库不自动授权。
+	if err := InitializeQuestionBankAccess(db); err != nil {
+		return err
+	}
+
 	return nil
 }
 

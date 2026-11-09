@@ -5,9 +5,11 @@
         <div class="logo">
           <el-icon :size="48" color="#409eff"><Collection /></el-icon>
         </div>
-        <h1 class="title">评茶员初赛理论题库</h1>
+        <h1 class="title">{{ isPractice ? '通用题库文字练习' : '评茶员初赛理论题库' }}</h1>
         <p class="subtitle">答题用户登录</p>
       </div>
+
+      <el-alert v-if="loginError" :title="loginError" type="error" :closable="false" show-icon class="login-error" />
 
       <el-form
         ref="formRef"
@@ -66,17 +68,22 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, reactive } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Collection, User, Lock } from '@element-plus/icons-vue'
 import { authApi } from '../api'
 import { useUserStore } from '../stores/user'
+import { entryFromRoute, entryHome, isPracticeEntry } from '../utils/entry'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const formRef = ref(null)
 const loading = ref(false)
+const loginError = ref('')
+const entry = computed(() => entryFromRoute(route))
+const isPractice = computed(() => isPracticeEntry(entry.value))
 
 const form = reactive({
   name: '',
@@ -99,14 +106,17 @@ const handleLogin = async () => {
     if (!valid) return
 
     loading.value = true
+    loginError.value = ''
     try {
       const res = await authApi.userLogin(form)
       userStore.setToken(res.token)
       userStore.setUserInfo(res.user)
 
       ElMessage.success('登录成功')
-      router.push('/welcome')
+      router.replace(entryHome(entry.value))
     } catch (error) {
+      // 登录失败不清空表单，也不触发全局 Token 过期跳转。
+      loginError.value = error?.message || '登录失败，请检查姓名和密码'
       console.error('登录失败:', error)
     } finally {
       loading.value = false
@@ -158,6 +168,10 @@ const handleLogin = async () => {
 .subtitle {
   font-size: 14px;
   color: #909399;
+}
+
+.login-error {
+  margin-top: 20px;
 }
 
 .login-form {

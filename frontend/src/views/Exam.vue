@@ -6,7 +6,7 @@
         <div class="header-left">
           <div class="brand">
             <el-icon :size="24" color="#409eff"><Collection /></el-icon>
-            <span class="brand-text">{{ examInfo.question_bank_name || '茶叶理论题库' }}</span>
+            <span class="brand-text">{{ examInfo.question_bank_name || (isPractice ? '通用题库文字练习' : '茶叶理论题库') }}</span>
           </div>
           <el-divider direction="vertical" />
           <div class="user-name">
@@ -56,6 +56,7 @@
               {
                 'answered-correct': item.status === 'correct',
                 'answered-wrong': item.status === 'wrong',
+                'answered-ungraded': item.status === 'ungraded',
                 'current-page': isQuestionInCurrentPage(item.position)
               }
             ]"
@@ -72,6 +73,10 @@
           <div class="legend-item">
             <span class="legend-dot answered-wrong"></span>
             <span>答错</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot answered-ungraded"></span>
+            <span>已答（未评分）</span>
           </div>
           <div class="legend-item">
             <span class="legend-dot unanswered"></span>
@@ -95,10 +100,9 @@
           >
             <div class="question-header">
               <span class="question-no">第 {{ question.question_no }} 题</span>
-              <el-tag v-if="question.question_type === 'multiple_choice'" type="warning" size="small" class="type-tag">多选题</el-tag>
-              <el-tag v-else-if="question.question_type === 'true_false'" type="success" size="small" class="type-tag">判断题</el-tag>
-              <el-tag v-else type="primary" size="small" class="type-tag">单选题</el-tag>
-              <el-tag v-if="question.has_answered" :type="question.is_correct ? 'success' : 'danger'" size="small">
+              <el-tag :type="typeTagType(question.question_type)" size="small" class="type-tag">{{ questionTypeLabel(question.question_type) }}</el-tag>
+              <el-tag v-if="question.has_answered && !question.is_graded" type="warning" size="small">已答（未自动评分）</el-tag>
+              <el-tag v-else-if="question.has_answered" :type="question.is_correct ? 'success' : 'danger'" size="small">
                 {{ question.is_correct ? '正确' : '错误' }}
               </el-tag>
               <el-tag v-else type="info" size="small">未作答</el-tag>
@@ -107,101 +111,152 @@
             <div class="question-content">
               <p class="question-text">{{ question.question_text }}</p>
 
-              <!-- 单选题和判断题：点击选择 -->
-              <div v-if="question.question_type !== 'multiple_choice'" class="options-list">
-                <div
-                  v-for="option in getOptions(question)"
-                  :key="option.key"
-                  :class="[
-                    'option-item',
-                    {
-                      'selected': question.user_answer === option.key,
-                      'correct': question.has_answered && question.correct_answer === option.key,
-                      'wrong': question.has_answered && question.user_answer === option.key && !question.is_correct
-                    }
-                  ]"
-                  @click="selectAnswer(question, option.key)"
-                >
-                  <span class="option-key">{{ option.key }}</span>
-                  <span class="option-text">{{ option.value }}</span>
+              <!-- 客观题选项 -->
+              <div
+                v-if="isChoiceType(question.question_type)"
+                class="options-list"
+                :class="{ 'multiple-choice': question.question_type === 'multiple_choice' }"
+              >
+                <template v-if="question.question_type === 'multiple_choice'">
+                  <el-checkbox-group
+                    v-model="question.selectedAnswers"
+                    :disabled="question.has_answered"
+                    @change="handleMultipleChoiceChange(question)"
+                  >
+                    <div
+                      v-for="option in getOptions(question)"
+                      :key="option.key"
+                      :class="[
+                        'option-item',
+                        'checkbox-option',
+                        {
+                          'correct': question.has_answered && question.correct_answer.includes(option.key),
+                          'wrong': question.has_answered && question.user_answer.includes(option.key) && !question.correct_answer.includes(option.key)
+                        }
+                      ]"
+                    >
+                      <el-checkbox :value="option.key">
+                        <span class="option-key checkbox-key">{{ option.key }}</span>
+                        <span class="option-text">{{ option.value }}</span>
+                      </el-checkbox>
 
-                  <!-- 答案标记 -->
-                  <el-icon v-if="question.has_answered && question.correct_answer === option.key" class="answer-icon correct-icon">
-                    <CircleCheck />
-                  </el-icon>
-                  <el-icon v-if="question.has_answered && question.user_answer === option.key && !question.is_correct" class="answer-icon wrong-icon">
-                    <CircleClose />
-                  </el-icon>
-                </div>
-              </div>
+                      <el-icon v-if="question.has_answered && question.correct_answer.includes(option.key)" class="answer-icon correct-icon">
+                        <CircleCheck />
+                      </el-icon>
+                      <el-icon v-if="question.has_answered && question.user_answer.includes(option.key) && !question.correct_answer.includes(option.key)" class="answer-icon wrong-icon">
+                        <CircleClose />
+                      </el-icon>
+                    </div>
+                  </el-checkbox-group>
 
-              <!-- 多选题：复选框选择 -->
-              <div v-else class="options-list multiple-choice">
-                <el-checkbox-group
-                  v-model="question.selectedAnswers"
-                  :disabled="question.has_answered"
-                  @change="handleMultipleChoiceChange(question)"
-                >
+                  <div v-if="!question.has_answered" class="submit-section">
+                    <el-button
+                      type="primary"
+                      :disabled="!question.selectedAnswers || question.selectedAnswers.length === 0"
+                      :loading="question.submitting"
+                      @click="submitMultipleChoice(question)"
+                    >
+                      提交本题
+                    </el-button>
+                    <span v-if="question.selectedAnswers && question.selectedAnswers.length > 0" class="selected-hint">
+                      已选：{{ question.selectedAnswers.slice().sort().join('') }}
+                    </span>
+                  </div>
+                </template>
+
+                <template v-else>
                   <div
                     v-for="option in getOptions(question)"
                     :key="option.key"
                     :class="[
                       'option-item',
-                      'checkbox-option',
                       {
-                        'correct': question.has_answered && question.correct_answer.includes(option.key),
-                        'wrong': question.has_answered && question.user_answer.includes(option.key) && !question.correct_answer.includes(option.key)
+                        'selected': question.user_answer === option.key,
+                        'correct': question.has_answered && question.correct_answer === option.key,
+                        'wrong': question.has_answered && question.user_answer === option.key && !question.is_correct
                       }
                     ]"
+                    @click="selectAnswer(question, option.key)"
                   >
-                    <el-checkbox :value="option.key">
-                      <span class="option-key checkbox-key">{{ option.key }}</span>
-                      <span class="option-text">{{ option.value }}</span>
-                    </el-checkbox>
+                    <span class="option-key">{{ option.key }}</span>
+                    <span class="option-text">{{ option.value }}</span>
 
-                    <!-- 答案标记 -->
-                    <el-icon v-if="question.has_answered && question.correct_answer.includes(option.key)" class="answer-icon correct-icon">
+                    <el-icon v-if="question.has_answered && question.correct_answer === option.key" class="answer-icon correct-icon">
                       <CircleCheck />
                     </el-icon>
-                    <el-icon v-if="question.has_answered && question.user_answer.includes(option.key) && !question.correct_answer.includes(option.key)" class="answer-icon wrong-icon">
+                    <el-icon v-if="question.has_answered && question.user_answer === option.key && !question.is_correct" class="answer-icon wrong-icon">
                       <CircleClose />
                     </el-icon>
                   </div>
-                </el-checkbox-group>
+                </template>
+              </div>
 
-                <!-- 提交按钮 -->
-                <div v-if="!question.has_answered" class="submit-section">
-                  <el-button
-                    type="primary"
-                    :disabled="!question.selectedAnswers || question.selectedAnswers.length === 0"
-                    @click="submitMultipleChoice(question)"
-                  >
-                    提交本题
-                  </el-button>
-                  <span v-if="question.selectedAnswers && question.selectedAnswers.length > 0" class="selected-hint">
-                    已选：{{ question.selectedAnswers.sort().join('') }}
-                  </span>
+              <!-- 填空题/简答题：文字作答，错误或未提交时保留草稿 -->
+              <div v-else class="text-answer">
+                <el-input
+                  v-if="question.question_type === 'fill_blank'"
+                  v-model="question.draftAnswer"
+                  type="textarea"
+                  :rows="2"
+                  :disabled="question.has_answered"
+                  placeholder="请输入答案（可换行）"
+                />
+                <el-input
+                  v-else
+                  v-model="question.draftAnswer"
+                  type="textarea"
+                  :rows="4"
+                  :disabled="question.has_answered"
+                  placeholder="请输入你的回答（提交后仅对照参考答案，不自动评分）"
+                />
+                <div v-if="!question.has_answered" class="text-submit">
+                  <span class="text-hint">{{ runeLength(question.draftAnswer) }} / 4000 个字符</span>
+                  <el-button type="primary" :loading="question.submitting" @click="submitTextAnswer(question)">提交本题</el-button>
                 </div>
               </div>
 
               <!-- 答案解析 -->
               <div v-if="question.has_answered" class="answer-analysis">
                 <el-alert
+                  v-if="!question.is_graded"
+                  title="已提交，简答题未自动评分"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                >
+                  <template #default>
+                    <p class="pre-wrap">参考答案：{{ question.correct_answer }}</p>
+                    <p class="pre-wrap">你的答案：{{ question.user_answer }}</p>
+                  </template>
+                </el-alert>
+                <el-alert
+                  v-else
                   :title="question.is_correct ? '回答正确！' : '回答错误'"
                   :type="question.is_correct ? 'success' : 'error'"
                   :closable="false"
                   show-icon
                 >
                   <template #default>
-                    <p>正确答案：{{ question.correct_answer }}</p>
-                    <p v-if="question.question_type === 'multiple_choice' && !question.is_correct">
-                      你的答案：{{ question.user_answer }}
-                    </p>
+                    <p class="pre-wrap">正确答案：{{ question.correct_answer }}</p>
+                    <p v-if="!question.is_correct" class="pre-wrap">你的答案：{{ question.user_answer }}</p>
                   </template>
                 </el-alert>
               </div>
             </div>
           </div>
+          <el-alert
+            v-if="examCompleted"
+            class="complete-alert"
+            title="本场答题已完成"
+            type="success"
+            :closable="false"
+            show-icon
+          >
+            <div class="complete-alert-content">
+              <span>请先核对上方最后一题的参考答案，再进入结果页。</span>
+              <el-button type="primary" @click="goToResult">查看结果</el-button>
+            </div>
+          </el-alert>
         </div>
 
         <!-- 分页器 -->
@@ -230,20 +285,6 @@
       </template>
     </el-dialog>
 
-    <!-- 考试完成对话框 -->
-    <el-dialog
-      v-model="completeDialogVisible"
-      title="考试完成"
-      width="min(400px, calc(100vw - 32px))"
-      :close-on-click-modal="false"
-      :show-close="false"
-    >
-      <div class="complete-content">
-        <el-icon :size="64" color="#67c23a" class="complete-icon"><CircleCheckFilled /></el-icon>
-        <h3>恭喜您完成考试！</h3>
-        <p>正在为您计算成绩...</p>
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -257,10 +298,13 @@ import {
 } from '@element-plus/icons-vue'
 import { examApi } from '../api'
 import { useUserStore } from '../stores/user'
+import { entryFromRoute, entryHome, isPracticeEntry } from '../utils/entry'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const entry = computed(() => entryFromRoute(route))
+const isPractice = computed(() => isPracticeEntry(entry.value))
 
 // 状态
 const loading = ref(true)
@@ -281,7 +325,7 @@ const answeredCount = ref(0)
 
 const unansweredDialogVisible = ref(false)
 const unansweredCount = ref(0)
-const completeDialogVisible = ref(false)
+const examCompleted = ref(false)
 
 // 计时器
 const formattedTime = computed(() => {
@@ -296,6 +340,24 @@ const progressPercentage = computed(() => {
   if (totalQuestions.value === 0) return 0
   return Math.round((answeredCount.value / totalQuestions.value) * 100)
 })
+
+const isChoiceType = (type) => ['single_choice', 'multiple_choice', 'true_false'].includes(type)
+const isTextType = (type) => ['fill_blank', 'short_answer'].includes(type)
+const questionTypeLabel = (type) => ({
+  single_choice: '单选题',
+  multiple_choice: '多选题',
+  true_false: '判断题',
+  fill_blank: '填空题',
+  short_answer: '简答题'
+}[type] || '单选题')
+const typeTagType = (type) => ({
+  single_choice: 'primary',
+  multiple_choice: 'warning',
+  true_false: 'success',
+  fill_blank: 'info',
+  short_answer: 'danger'
+}[type] || 'primary')
+const runeLength = (value) => Array.from(value || '').length
 
 // 获取选项列表
 const getOptions = (question) => {
@@ -325,15 +387,15 @@ const loadQuestions = async () => {
       exam_id: examId.value
     })
 
-    // 为多选题初始化选中状态
+    // 初始化多选题选中状态和文字题草稿；已提交后由服务端恢复答案。
     questions.value = res.list.map(q => {
+      q.submitting = false
+      q.correct_answer = q.correct_answer || ''
       if (q.question_type === 'multiple_choice') {
-        // 如果已作答，解析用户答案为数组
-        if (q.has_answered && q.user_answer) {
-          q.selectedAnswers = q.user_answer.split('')
-        } else {
-          q.selectedAnswers = []
-        }
+        q.selectedAnswers = q.has_answered && q.user_answer ? q.user_answer.split('') : []
+      }
+      if (isTextType(q.question_type)) {
+        q.draftAnswer = q.user_answer || ''
       }
       return q
     })
@@ -359,63 +421,66 @@ const loadQuestionStatus = async () => {
   }
 }
 
-// 选择答案（单选题）
-const selectAnswer = async (question, answer) => {
-  // 已锁定则不能修改
-  if (question.has_answered) {
-    ElMessage.warning('本题已锁定，无法修改答案')
+// 提交成功后的统一状态更新；最后一题也先展示参考答案，不立即跳转。
+const applySubmitResult = async (question, answer, res) => {
+  question.has_answered = true
+  question.user_answer = res.user_answer ?? answer
+  question.is_correct = res.is_correct === true
+  question.is_graded = res.is_graded !== false
+  question.is_locked = true
+  question.correct_answer = res.correct_answer || ''
+  question.draftAnswer = question.user_answer
+
+  await loadQuestionStatus()
+
+  if (res.is_completed) {
+    examCompleted.value = true
+    stopTimer()
     return
   }
 
-  try {
-    const res = await examApi.submitAnswer(examId.value, {
-      question_id: question.id,
-      answer: answer
-    })
-
-    // 更新题目状态
-    question.has_answered = true
-    question.user_answer = answer
-    question.is_correct = res.is_correct
-    question.is_locked = true
-    question.correct_answer = res.correct_answer
-
-    // 刷新状态列表
-    await loadQuestionStatus()
-
-    // 检查是否完成
-    if (res.is_completed) {
-      completeDialogVisible.value = true
-      setTimeout(() => {
-        router.push(`/result/${examId.value}`)
-      }, 2000)
-      return
-    }
-
-    // 显示反馈
+  if (question.is_graded) {
     if (res.is_correct) {
       ElMessage.success('回答正确！')
     } else {
       ElMessage.error('回答错误')
     }
+  } else {
+    ElMessage.info('已提交，简答题不自动评分')
+  }
 
-    // 检查是否是当前页最后一题，是则自动跳转下一页
-    const currentPageQuestions = questions.value
-    const currentQuestionIndex = currentPageQuestions.findIndex(q => q.id === question.id)
-    if (currentQuestionIndex === currentPageQuestions.length - 1 && currentPage.value < totalPages.value) {
-      setTimeout(() => {
-        currentPage.value++
-        handlePageChange()
-      }, 1000)
-    }
+  const currentQuestionIndex = questions.value.findIndex(q => q.id === question.id)
+  // 文字题需要停留当前页对照参考答案，不自动翻页；旧客观题保留原行为。
+  if (!isTextType(question.question_type) && currentQuestionIndex === questions.value.length - 1 && currentPage.value < totalPages.value) {
+    setTimeout(() => {
+      currentPage.value++
+      handlePageChange()
+    }, 1000)
+  }
+}
+
+// 选择答案（单选题/判断题）
+const selectAnswer = async (question, answer) => {
+  if (question.has_answered || question.submitting) {
+    ElMessage.warning('本题已锁定，无法修改答案')
+    return
+  }
+  question.submitting = true
+  try {
+    const res = await examApi.submitAnswer(examId.value, {
+      question_id: question.id,
+      answer: answer
+    })
+    await applySubmitResult(question, answer, res)
   } catch (error) {
     console.error('提交答案失败:', error)
+  } finally {
+    question.submitting = false
   }
 }
 
 // 多选题选择变化处理
 const handleMultipleChoiceChange = (question) => {
-  // 将选中的答案排序并转为字符串
   if (question.selectedAnswers && question.selectedAnswers.length > 0) {
     question.selectedAnswers.sort()
   }
@@ -423,55 +488,62 @@ const handleMultipleChoiceChange = (question) => {
 
 // 提交多选题答案
 const submitMultipleChoice = async (question) => {
-  // 已锁定则不能修改
-  if (question.has_answered) {
+  if (question.has_answered || question.submitting) {
     ElMessage.warning('本题已锁定，无法修改答案')
     return
   }
-
-  // 检查是否选择了答案
   if (!question.selectedAnswers || question.selectedAnswers.length === 0) {
     ElMessage.warning('请至少选择一个选项')
     return
   }
 
-  // 将选中的答案排序并转为字符串（如 ['A', 'C', 'B'] -> 'ABC'）
   const answer = question.selectedAnswers.slice().sort().join('')
-
+  question.submitting = true
   try {
     const res = await examApi.submitAnswer(examId.value, {
       question_id: question.id,
       answer: answer
     })
-
-    // 更新题目状态
-    question.has_answered = true
-    question.user_answer = answer
-    question.is_correct = res.is_correct
-    question.is_locked = true
-    question.correct_answer = res.correct_answer
-
-    // 刷新状态列表
-    await loadQuestionStatus()
-
-    // 检查是否完成
-    if (res.is_completed) {
-      completeDialogVisible.value = true
-      setTimeout(() => {
-        router.push(`/result/${examId.value}`)
-      }, 2000)
-      return
-    }
-
-    // 显示反馈
-    if (res.is_correct) {
-      ElMessage.success('回答正确！')
-    } else {
-      ElMessage.error('回答错误')
-    }
+    await applySubmitResult(question, answer, res)
   } catch (error) {
     console.error('提交答案失败:', error)
+  } finally {
+    question.submitting = false
   }
+}
+
+// 提交填空题/简答题；失败时保留草稿。
+const submitTextAnswer = async (question) => {
+  if (question.has_answered || question.submitting) {
+    ElMessage.warning('本题已锁定，无法修改答案')
+    return
+  }
+  const answer = question.draftAnswer || ''
+  if (!answer.trim()) {
+    ElMessage.warning('请输入答案')
+    return
+  }
+  if (runeLength(answer) > 4000) {
+    ElMessage.warning('答案不能超过4000个字符')
+    return
+  }
+  question.submitting = true
+  try {
+    const res = await examApi.submitAnswer(examId.value, {
+      question_id: question.id,
+      answer: answer
+    })
+    await applySubmitResult(question, answer, res)
+  } catch (error) {
+    // 草稿保留在 question.draftAnswer 中，便于修改后重试。
+    console.error('提交文字答案失败:', error)
+  } finally {
+    question.submitting = false
+  }
+}
+
+const goToResult = () => {
+  router.push({ path: `/result/${examId.value}`, query: { entry: entry.value } })
 }
 
 // 跳转到题目所在页
@@ -534,7 +606,7 @@ onMounted(async () => {
   examId.value = route.query.exam_id
   if (!examId.value) {
     ElMessage.error('考试ID无效')
-    router.push('/welcome')
+    router.push(entryHome(entry.value))
     return
   }
 
@@ -542,12 +614,16 @@ onMounted(async () => {
   try {
     const info = await examApi.getExamInfo(examId.value)
     examInfo.value = info
-    if (info.status === 'completed') {
-      router.replace(`/result/${examId.value}`)
-      return
+    const completed = info.status === 'completed'
+    if (completed) {
+      // 已完成后刷新仍加载锁定题目和参考答案，由用户自行进入结果，不自动跳走。
+      examCompleted.value = true
+      stopTimer()
     }
     if (info.start_time) {
       startTime.value = info.start_time
+    }
+    if (!completed && info.start_time) {
       startTimer()
     }
   } catch (error) {
@@ -740,6 +816,11 @@ onUnmounted(() => {
   color: #f44336;
 }
 
+.grid-item.answered-ungraded {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
 .grid-item.current-page {
   border-color: #409eff;
 }
@@ -774,6 +855,11 @@ onUnmounted(() => {
 .legend-dot.answered-wrong {
   background: #ffebee;
   border: 1px solid #f44336;
+}
+
+.legend-dot.answered-ungraded {
+  background: #fdf6ec;
+  border: 1px solid #e6a23c;
 }
 
 .legend-dot.unanswered {
@@ -828,6 +914,8 @@ onUnmounted(() => {
   line-height: 1.6;
   color: #303133;
   margin-bottom: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .options-list {
@@ -897,6 +985,7 @@ onUnmounted(() => {
   font-size: 14px;
   color: #606266;
   line-height: 1.6;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -915,6 +1004,40 @@ onUnmounted(() => {
 
 .answer-analysis {
   margin-top: 16px;
+}
+
+.text-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.text-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.text-hint {
+  color: #909399;
+  font-size: 13px;
+}
+
+.pre-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.complete-alert {
+  margin-top: 16px;
+}
+
+.complete-alert-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 /* 多选题样式 */
@@ -1185,7 +1308,9 @@ onUnmounted(() => {
     white-space: normal;
   }
 
-  .submit-section {
+  .submit-section,
+  .text-submit,
+  .complete-alert-content {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;

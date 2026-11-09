@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -89,17 +90,11 @@ func tryDecodeGBK(data []byte) ([][]string, error) {
 	return reader.ReadAll()
 }
 
-// ParseQuestions 解析 CSV 数据为题库记录
+// ParseQuestions 解析 CSV 数据。未知题型或任一非法行都会记录失败，调用方必须整批拒绝。
 func ParseQuestions(records [][]string, startRow int) ([]QuestionImport, *ImportResult) {
-	result := &ImportResult{
-		SuccessCount: 0,
-		FailCount:    0,
-		FailReasons:  []string{},
-	}
-
+	result := &ImportResult{FailCount: 0, FailReasons: []string{}}
 	var questions []QuestionImport
 
-	// 跳过标题行，从 startRow 开始解析
 	for i := startRow; i < len(records); i++ {
 		row := records[i]
 		if len(row) < 11 {
@@ -108,92 +103,93 @@ func ParseQuestions(records [][]string, startRow int) ([]QuestionImport, *Import
 			continue
 		}
 
-		// 清理字段
 		for j := range row {
 			row[j] = strings.TrimSpace(row[j])
 		}
-
-		// 解析题号
 		var questionNo int
-		_, err := fmt.Sscanf(row[0], "%d", &questionNo)
-		if err != nil || questionNo <= 0 {
+		if _, err := fmt.Sscanf(row[0], "%d", &questionNo); err != nil || questionNo <= 0 {
 			result.FailCount++
 			result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 题号无效", i+1))
 			continue
 		}
-
-		// 验证必填字段
-		if row[4] == "" { // 题干
+		if row[4] == "" {
 			result.FailCount++
 			result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 题干不能为空", i+1))
 			continue
 		}
-
-		if row[10] == "" { // 正确答案
+		if row[10] == "" {
 			result.FailCount++
 			result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 正确答案不能为空", i+1))
 			continue
 		}
 
-		// 获取题型编码和正确答案（统一转小写处理）
-		questionTypeCode := strings.TrimSpace(strings.ToLower(row[2]))
-		correctAnswer := strings.ToUpper(row[10])
+		questionTypeCode := strings.ToLower(strings.TrimSpace(row[2]))
+		correctAnswer := row[10]
+		fail := func(reason string) {
+			result.FailCount++
+			result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: %s", i+1, reason))
+		}
 
-		// 严格按照三种题型编码判断，并验证答案格式
-		var finalTypeCode string
 		switch questionTypeCode {
-		case "multiple_choice":
-			finalTypeCode = "multiple_choice"
-			// 多选题验证：允许多个字母组合（2-5个，如 AB、ACD）
-			if len(correctAnswer) < 2 || len(correctAnswer) > 5 {
-				result.FailCount++
-				result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 多选题正确答案必须是 2-5 个字母的组合", i+1))
+		case "single_choice":
+			correctAnswer = strings.ToUpper(correctAnswer)
+			if len(correctAnswer) != 1 || !strings.Contains("ABCDE", correctAnswer) {
+				fail("单选题正确答案必须是 A、B、C、D 或 E 中的单个字母")
 				continue
 			}
-			// 验证每个字符都是 A-E
+		case "multiple_choice":
+			correctAnswer = strings.ToUpper(correctAnswer)
+			if len(correctAnswer) < 2 || len(correctAnswer) > 5 {
+				fail("多选题正确答案必须是 2-5 个字母的组合")
+				continue
+			}
 			valid := true
 			for _, ch := range correctAnswer {
-				if ch != 'A' && ch != 'B' && ch != 'C' && ch != 'D' && ch != 'E' {
+				if ch < 'A' || ch > 'E' {
 					valid = false
 					break
 				}
 			}
 			if !valid {
-				result.FailCount++
-				result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 多选题正确答案只能包含字母 A、B、C、D、E", i+1))
+				fail("多选题正确答案只能包含字母 A、B、C、D、E")
 				continue
 			}
 		case "true_false":
-			finalTypeCode = "true_false"
-			// 判断题验证：只能有 A 或 B
+			correctAnswer = strings.ToUpper(correctAnswer)
 			if correctAnswer != "A" && correctAnswer != "B" {
-				result.FailCount++
-				result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 判断题正确答案必须是 A 或 B", i+1))
+				fail("判断题正确答案必须是 A 或 B")
+				continue
+			}
+		case "fill_blank", "short_answer":
+			correctAnswer = strings.TrimSpace(row[10])
+			if correctAnswer == "" {
+				fail("文字题参考答案不能为空")
+				continue
+			}
+			if utf8.RuneCountInString(correctAnswer) > 4000 {
+				fail("文字题参考答案不能超过4000个字符")
 				continue
 			}
 		default:
-			// 单选题（包括 single_choice 和任何其他值）
-			finalTypeCode = "single_choice"
-			// 单选题验证：只能有一个正确答案
-			if len(correctAnswer) != 1 || (correctAnswer != "A" && correctAnswer != "B" && correctAnswer != "C" && correctAnswer != "D" && correctAnswer != "E") {
-				result.FailCount++
-				result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 单选题正确答案必须是 A、B、C、D 或 E 中的单个字母", i+1))
-				continue
-			}
-		}
-
-		// 至少要有 A、B 两个选项
-		if row[5] == "" || row[6] == "" { // OptionA, OptionB
-			result.FailCount++
-			result.FailReasons = append(result.FailReasons, fmt.Sprintf("第%d行: 至少要有 A、B 两个选项", i+1))
+			fail("未知题型，仅支持 single_choice/multiple_choice/true_false/fill_blank/short_answer")
 			continue
 		}
 
-		q := QuestionImport{
+		isChoice := questionTypeCode == "single_choice" || questionTypeCode == "multiple_choice" || questionTypeCode == "true_false"
+		if isChoice && (row[5] == "" || row[6] == "") {
+			fail("至少要有 A、B 两个选项")
+			continue
+		}
+
+		typeName := row[3]
+		if typeName == "" {
+			typeName = defaultQuestionTypeName(questionTypeCode)
+		}
+		questions = append(questions, QuestionImport{
 			QuestionNo:       questionNo,
 			BankName:         row[1],
-			QuestionTypeCode: finalTypeCode,
-			QuestionTypeName: row[3],
+			QuestionTypeCode: questionTypeCode,
+			QuestionTypeName: typeName,
 			QuestionText:     row[4],
 			OptionA:          row[5],
 			OptionB:          row[6],
@@ -201,13 +197,28 @@ func ParseQuestions(records [][]string, startRow int) ([]QuestionImport, *Import
 			OptionD:          row[8],
 			OptionE:          row[9],
 			CorrectAnswer:    correctAnswer,
-		}
-
-		questions = append(questions, q)
+		})
 		result.SuccessCount++
 	}
 
 	return questions, result
+}
+
+func defaultQuestionTypeName(code string) string {
+	switch code {
+	case "single_choice":
+		return "单选题"
+	case "multiple_choice":
+		return "多选题"
+	case "true_false":
+		return "判断题"
+	case "fill_blank":
+		return "填空题"
+	case "short_answer":
+		return "简答题"
+	default:
+		return code
+	}
 }
 
 // ReadCSVFile 读取 CSV 文件并返回解析后的数据

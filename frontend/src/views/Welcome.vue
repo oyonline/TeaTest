@@ -4,7 +4,7 @@
       <div class="header-content">
         <div class="brand">
           <el-icon :size="28" color="#409eff"><Collection /></el-icon>
-          <span class="brand-text">茶叶理论题库</span>
+          <span class="brand-text">{{ isPractice ? '通用题库文字练习' : '茶叶理论题库' }}</span>
         </div>
         <div class="user-info">
           <el-icon><User /></el-icon>
@@ -20,7 +20,7 @@
     <main class="main-content">
       <section class="welcome-header">
         <div>
-          <h1>选择题库开始答题</h1>
+          <h1>{{ isPractice ? '选择通用题库开始练习' : '选择题库开始答题' }}</h1>
           <p>每个题库会单独保存一场进行中的答题记录</p>
         </div>
         <div class="summary-card">
@@ -32,31 +32,19 @@
         </div>
       </section>
 
-      <el-alert
-        v-if="legacyExam"
-        class="legacy-alert"
-        title="您还有一场历史未分类考试"
-        type="warning"
-        :closable="false"
-        show-icon
-      >
-        <template #default>
-          <div class="legacy-content">
-            <span>已答 {{ legacyExam.answered_count || 0 }} / {{ legacyExam.total_questions || 0 }} 题</span>
-            <el-button type="warning" size="small" @click="continueExam(legacyExam.exam_id)">继续历史考试</el-button>
-          </div>
-        </template>
-      </el-alert>
-
       <div v-loading="loading" class="bank-sections">
         <section v-for="group in bankGroups" :key="group.code" class="bank-section">
           <div class="section-title">
             <div class="section-icon" :class="group.code">
-              <el-icon><Trophy v-if="group.code === 'competition'" /><Medal v-else /></el-icon>
+              <el-icon>
+                <Trophy v-if="group.code === 'competition'" />
+                <Collection v-else-if="group.code === 'general'" />
+                <Medal v-else />
+              </el-icon>
             </div>
             <div>
               <h2>{{ group.name }}</h2>
-              <p>{{ group.code === 'competition' ? '竞赛专项练习' : '职业技能考级练习' }}</p>
+              <p>{{ group.code === 'competition' ? '竞赛专项练习' : group.code === 'general' ? '文字练习与通用知识' : '职业技能考级练习' }}</p>
             </div>
           </div>
 
@@ -102,7 +90,7 @@
           </div>
         </section>
 
-        <el-empty v-if="!loading && banks.length === 0" description="暂无可用题库，请联系管理员" />
+        <el-empty v-if="!loading && banks.length === 0" :description="isPractice ? '暂无已授权的通用题库，请联系管理员' : '暂无可用题库，请联系管理员'" />
       </div>
 
       <section class="rules-section">
@@ -120,7 +108,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Check, CircleCheck, Collection, Document, InfoFilled,
@@ -128,26 +116,26 @@ import {
 } from '@element-plus/icons-vue'
 import { examApi } from '../api'
 import { useUserStore } from '../stores/user'
+import { entryFromRoute, entryLogin, isPracticeEntry } from '../utils/entry'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const entry = computed(() => entryFromRoute(route))
+const isPractice = computed(() => isPracticeEntry(entry.value))
 const loading = ref(true)
 const banks = ref([])
 const completedExams = ref(0)
-const legacyExam = ref(null)
 
-const bankGroups = computed(() => [
-  {
-    code: 'competition',
-    name: '竞赛题库',
-    banks: banks.value.filter(bank => bank.category_code === 'competition')
-  },
-  {
-    code: 'certification',
-    name: '考级题库',
-    banks: banks.value.filter(bank => bank.category_code === 'certification')
-  }
-].filter(group => group.banks.length > 0))
+const bankGroups = computed(() => {
+  const definitions = isPractice.value
+    ? [{ code: 'general', name: '通用题库' }]
+    : [{ code: 'competition', name: '竞赛题库' }, { code: 'certification', name: '考级题库' }]
+  return definitions.map(group => ({
+    ...group,
+    banks: banks.value.filter(bank => bank.category_code === group.code)
+  })).filter(group => group.banks.length > 0)
+})
 
 const progressOf = (bank) => {
   if (!bank.question_count) return 0
@@ -158,12 +146,11 @@ const loadData = async () => {
   loading.value = true
   try {
     const [bankList, stats] = await Promise.all([
-      examApi.getQuestionBanks(),
-      examApi.getExamStats()
+      examApi.getQuestionBanks(entry.value),
+      examApi.getExamStats(entry.value)
     ])
     banks.value = bankList || []
     completedExams.value = stats.completed_exams || 0
-    legacyExam.value = stats.legacy_in_progress || null
   } catch (error) {
     console.error('加载题库失败:', error)
   } finally {
@@ -178,7 +165,7 @@ const startNewExam = async (bank) => {
       '开始答题',
       { confirmButtonText: '开始', cancelButtonText: '取消', type: 'info' }
     )
-    const res = await examApi.startExam(bank.id)
+    const res = await examApi.startExam(bank.id, entry.value)
     ElMessage.success('考试开始')
     continueExam(res.exam_id)
   } catch (error) {
@@ -189,13 +176,13 @@ const startNewExam = async (bank) => {
 }
 
 const continueExam = (examId) => {
-  router.push({ path: '/exam', query: { exam_id: examId } })
+  router.push({ path: '/exam', query: { exam_id: examId, entry: entry.value } })
 }
 
 const handleLogout = () => {
   userStore.logout()
   ElMessage.success('已退出登录')
-  router.push('/')
+  router.push(entryLogin(entry.value))
 }
 
 onMounted(loadData)

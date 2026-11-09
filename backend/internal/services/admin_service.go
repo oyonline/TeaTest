@@ -249,8 +249,10 @@ func validateQuestionBankInput(input *QuestionBankTypeInput) error {
 	if input.Name == "" {
 		return errors.New("题库名称不能为空")
 	}
-	if input.CategoryCode != models.QuestionBankCategoryCompetition && input.CategoryCode != models.QuestionBankCategoryCertification {
-		return errors.New("一级分类只能选择竞赛题库或考级题库")
+	if input.CategoryCode != models.QuestionBankCategoryCompetition &&
+		input.CategoryCode != models.QuestionBankCategoryCertification &&
+		input.CategoryCode != models.QuestionBankCategoryGeneral {
+		return errors.New("一级分类只能选择竞赛题库、考级题库或通用题库")
 	}
 	if input.Status != 0 && input.Status != 1 {
 		return errors.New("题库状态无效")
@@ -260,7 +262,7 @@ func validateQuestionBankInput(input *QuestionBankTypeInput) error {
 
 func (s *AdminService) ListQuestionBanks() ([]AdminQuestionBank, error) {
 	var banks []models.QuestionBankType
-	if err := s.db.Order("CASE category_code WHEN 'competition' THEN 0 ELSE 1 END, sort_order ASC, id ASC").Find(&banks).Error; err != nil {
+	if err := s.db.Order("CASE category_code WHEN 'competition' THEN 0 WHEN 'certification' THEN 1 WHEN 'general' THEN 2 ELSE 3 END, sort_order ASC, id ASC").Find(&banks).Error; err != nil {
 		return nil, err
 	}
 
@@ -380,6 +382,9 @@ func (s *AdminService) GetExamRecords(page, pageSize int, keyword, bankFilter st
 	}
 	if err := query.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&records).Error; err != nil {
 		return nil, 0, err
+	}
+	for i := range records {
+		populateExamSummary(s.db, &records[i])
 	}
 	return records, total, nil
 }
@@ -537,4 +542,79 @@ func (s *AdminService) ReclassifyQuestions(questionIDs []uint, bankID uint, allU
 		return 0, err
 	}
 	return updatedCount, nil
+}
+
+// UserQuestionBankAccess 后台回显某答题人可访问题库。
+type UserQuestionBankAccess struct {
+	UserID          uint   `json:"user_id"`
+	QuestionBankIDs []uint `json:"question_bank_ids"`
+}
+
+// GetUserQuestionBanks 返回用户当前授权；未分配时为空数组。
+func (s *AdminService) GetUserQuestionBanks(userID uint) (*UserQuestionBankAccess, error) {
+	if userID == 0 {
+		return nil, errors.New("答题人ID无效")
+	}
+	var user models.ExamUser
+	if err := s.db.First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("答题人不存在")
+		}
+		return nil, err
+	}
+	ids := make([]uint, 0)
+	if err := s.db.Model(&models.ExamUserQuestionBank{}).
+		Where("user_id = ?", userID).
+		Order("question_bank_type_id ASC").
+		Pluck("question_bank_type_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return &UserQuestionBankAccess{UserID: userID, QuestionBankIDs: ids}, nil
+}
+
+// ReplaceUserQuestionBanks 事务内全量替换授权。非法/不存在 ID 整批拒绝；空数组撤销全部。
+func (s *AdminService) ReplaceUserQuestionBanks(userID uint, questionBankIDs []uint) error {
+	if userID == 0 {
+		return errors.New("答题人ID无效")
+	}
+	seen := make(map[uint]bool, len(questionBankIDs))
+	unique := make([]uint, 0, len(questionBankIDs))
+	for _, id := range questionBankIDs {
+		if id == 0 {
+			return errors.New("题库ID无效")
+		}
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var user models.ExamUser
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("答题人不存在")
+			}
+			return err
+		}
+		if len(unique) > 0 {
+			var count int64
+			if err := tx.Model(&models.QuestionBankType{}).Where("id IN ?", unique).Count(&count).Error; err != nil {
+				return err
+			}
+			if int(count) != len(unique) {
+				return errors.New("包含不存在的题库ID，未保存任何变更")
+			}
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&models.ExamUserQuestionBank{}).Error; err != nil {
+			return err
+		}
+		if len(unique) == 0 {
+			return nil
+		}
+		links := make([]models.ExamUserQuestionBank, 0, len(unique))
+		for _, bankID := range unique {
+			links = append(links, models.ExamUserQuestionBank{UserID: userID, QuestionBankTypeID: bankID})
+		}
+		return tx.Create(&links).Error
+	})
 }

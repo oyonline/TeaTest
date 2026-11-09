@@ -2,6 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
 import { useAdminStore } from '../stores/admin'
+import { entryFromLocation, entryLogin } from '../utils/entry'
 
 // 创建 axios 实例
 const request = axios.create({
@@ -19,7 +20,8 @@ request.interceptors.request.use(
     // 根据请求路径判断使用哪个 token
     // 管理后台接口优先使用管理员 token
     const isAdminApi = config.url?.startsWith('/admin')
-    const token = isAdminApi ? (adminStore.token || userStore.token) : (userStore.token || adminStore.token)
+    // 用户接口绝不借用 admin token，避免固定管理员 ID 被当成答题人。
+    const token = isAdminApi ? adminStore.token : userStore.token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -40,13 +42,23 @@ request.interceptors.response.use(
     if (data.code !== 0) {
       ElMessage.error(data.message || '操作失败')
 
-      // 登录过期
+      // 登录接口失败只显示错误并保留表单；只有已持有身份的接口才清理对应 Token。
       if (data.code === 401) {
-        const userStore = useUserStore()
-        const adminStore = useAdminStore()
-        userStore.logout()
-        adminStore.logout()
-        window.location.href = '/'
+        const url = response.config?.url || ''
+        const isLoginRequest = url.includes('/auth/user/login') || url.includes('/auth/admin/login')
+        if (!isLoginRequest) {
+          const userStore = useUserStore()
+          const adminStore = useAdminStore()
+          if (url.startsWith('/admin')) {
+            adminStore.logout()
+            if (!window.location.pathname.startsWith('/admin/login')) {
+              window.location.href = '/admin/login'
+            }
+          } else {
+            userStore.logout()
+            window.location.href = entryLogin(entryFromLocation())
+          }
+        }
       }
 
       return Promise.reject(new Error(data.message))

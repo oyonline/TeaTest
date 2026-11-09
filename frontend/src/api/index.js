@@ -15,15 +15,15 @@ export const authApi = {
 // 考试相关
 export const examApi = {
   // 获取可选择的具体题库
-  getQuestionBanks: () => request.get('/exam/question-banks'),
+  getQuestionBanks: (entry = 'tea') => request.get('/exam/question-banks', { params: { entry } }),
 
   // 获取进行中的考试
-  getInProgressExam: (questionBankId) => request.get('/exam/in-progress', {
-    params: questionBankId ? { question_bank_id: questionBankId } : {}
+  getInProgressExam: (questionBankId, entry = 'tea') => request.get('/exam/in-progress', {
+    params: { entry, ...(questionBankId ? { question_bank_id: questionBankId } : {}) }
   }),
 
   // 开始考试
-  startExam: (questionBankId) => request.post('/exam/start', { question_bank_id: questionBankId }),
+  startExam: (questionBankId, entry = 'tea') => request.post('/exam/start', { question_bank_id: questionBankId }, { params: { entry } }),
 
   // 获取考试信息
   getExamInfo: (examId) => request.get(`/exam/${examId}/info`),
@@ -44,7 +44,7 @@ export const examApi = {
   getExamResult: (examId) => request.get(`/exam/${examId}/result`),
 
   // 获取考试统计
-  getExamStats: () => request.get('/exam/stats')
+  getExamStats: (entry = 'tea') => request.get('/exam/stats', { params: { entry } })
 }
 
 // 管理相关
@@ -53,6 +53,8 @@ export const adminApi = {
   getUsers: (params) => request.get('/admin/users', { params }),
   createUser: (data) => request.post('/admin/users', data),
   resetUserPassword: (id, data) => request.post(`/admin/users/${id}/reset-password`, data),
+  getUserQuestionBanks: (id) => request.get(`/admin/users/${id}/question-banks`),
+  replaceUserQuestionBanks: (id, data) => request.put(`/admin/users/${id}/question-banks`, data),
 
   // 获取题库统计
   getBankStats: () => request.get('/admin/stats'),

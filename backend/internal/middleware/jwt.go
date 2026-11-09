@@ -151,3 +151,16 @@ func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// UserOnly 确保答题接口只接受真实 role=user 的 Token，避免 admin 固定 ID 被当作答题人。
+func UserOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, _ := c.Get("role")
+		if role != "user" {
+			response.Forbidden(c, "需要答题用户权限")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

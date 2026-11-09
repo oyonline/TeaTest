@@ -1,19 +1,32 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useAdminStore } from '../stores/admin'
+import { entryFromRoute, entryHome, entryLogin } from '../utils/entry'
 
 const routes = [
   {
     path: '/',
     name: 'UserLogin',
     component: () => import('../views/UserLogin.vue'),
-    meta: { guest: true }
+    meta: { guest: true, entry: 'tea' }
+  },
+  {
+    path: '/practice',
+    name: 'PracticeLogin',
+    component: () => import('../views/UserLogin.vue'),
+    meta: { guest: true, entry: 'practice' }
   },
   {
     path: '/welcome',
     name: 'Welcome',
     component: () => import('../views/Welcome.vue'),
-    meta: { requiresUser: true }
+    meta: { requiresUser: true, entry: 'tea' }
+  },
+  {
+    path: '/practice/banks',
+    name: 'PracticeWelcome',
+    component: () => import('../views/Welcome.vue'),
+    meta: { requiresUser: true, entry: 'practice' }
   },
   {
     path: '/exam',
@@ -82,7 +95,7 @@ router.beforeEach((to, from, next) => {
   // 需要用户登录的页面
   if (to.meta.requiresUser) {
     if (!userStore.token) {
-      next('/')
+      next(entryLogin(entryFromRoute(to)))
       return
     }
   }
@@ -97,8 +110,8 @@ router.beforeEach((to, from, next) => {
 
   // 游客页面（已登录则跳转）
   if (to.meta.guest) {
-    if (userStore.token && to.path === '/') {
-      next('/welcome')
+    if (userStore.token && (to.path === '/' || to.path === '/practice')) {
+      next(entryHome(entryFromRoute(to)))
       return
     }
     if (adminStore.token && to.path === '/admin/login') {
